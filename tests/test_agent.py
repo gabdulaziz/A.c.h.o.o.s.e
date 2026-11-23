@@ -138,6 +138,9 @@ class FakeOllama(BaseHTTPRequestHandler):
             self._send(200, {"message": {"role": "assistant", "thinking": "hmm", "content":
                 '[{"type":"function","function":{"name":"get_current_time","arguments":{}}}]'}})
             return
+        if body["model"] == "thinker":
+            self._send(200, {"message": {"role": "assistant", "content": "Let me see...\n</think>\n\nParis."}})
+            return
         if body["model"] == "missing":
             self._send(404, {"error": f"model '{body['model']}' not found"})
             return
@@ -211,6 +214,11 @@ class OllamaBrainTests(unittest.TestCase):
     def test_no_rescue_when_no_tools_offered(self):
         reply = OllamaBrain("texty", host=self.host).chat([Message("user", "time?")], [])
         self.assertEqual(reply.tool_calls, [])
+
+    def test_think_tags_are_hidden_from_the_answer(self):
+        reply = OllamaBrain("thinker", host=self.host).chat([Message("user", "capital?")], [])
+        self.assertEqual(reply.content, "Paris.")
+        self.assertIn("Let me see", reply.thinking)
 
     def test_missing_model_gives_pull_hint(self):
         with self.assertRaisesRegex(BrainError, "ollama pull missing"):

@@ -9,7 +9,7 @@ For each model it measures:
 
 Run from the project folder:
     python3 scripts/benchmark.py                      # the default candidates
-    python3 scripts/benchmark.py llama3.2:3b qwen3:4b  # your own choice
+    python3 scripts/benchmark.py llama3.2:3b qwen3.5:4b  # your own choice
 
 Models must be downloaded first (ollama pull <name>). Nothing is run on your
 files: tool requests are only checked, never carried out.
@@ -34,7 +34,7 @@ from achoose.brain import BrainError, Message, OllamaBrain  # noqa: E402
 from achoose.config import load_config  # noqa: E402
 from achoose.tools import ToolRegistry, builtin_tools  # noqa: E402
 
-DEFAULT_MODELS = ["qwen3:4b", "qwen3.5:4b", "llama3.2:3b"]
+DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "qwen3.5:4b", "llama3.2:3b"]
 
 SPEED_PROMPT = "In about 120 words, explain why making regular backups of your files is important."
 
@@ -213,15 +213,15 @@ def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
 
 
 def print_table(results: list[Result]) -> None:
-    head = f"{'model':<16}{'load s':>8}{'tok/s':>8}{'read tok/s':>12}{'tools':>8}{'s/request':>11}{'RAM GB':>8}"
+    head = f"{'model':<30}{'load s':>8}{'tok/s':>8}{'read tok/s':>12}{'tools':>8}{'s/request':>11}{'RAM GB':>8}"
     print("\n" + head)
     print("-" * len(head))
     for r in results:
         if not r.ok:
-            print(f"{r.model:<16}  FAILED: {r.error}")
+            print(f"{r.model:<30}  FAILED: {r.error}")
             continue
         print(
-            f"{r.model:<16}{r.load_seconds:>8}{r.output_tokens_per_second:>8}"
+            f"{r.model:<30}{r.load_seconds:>8}{r.output_tokens_per_second:>8}"
             f"{r.prompt_tokens_per_second:>12}{f'{r.tool_score}/{r.tool_total}':>8}"
             f"{r.tool_avg_seconds:>11}{r.ram_gb:>8}"
         )
@@ -230,7 +230,7 @@ def print_table(results: list[Result]) -> None:
         if not r.ok:
             continue
         line = (
-            f"  {r.model:<16} reading {r.avg_read_tokens} tokens took {r.avg_read_seconds}s, "
+            f"  {r.model:<30} reading {r.avg_read_tokens} tokens took {r.avg_read_seconds}s, "
             f"writing {r.avg_write_tokens} tokens took {r.avg_write_seconds}s"
         )
         if r.thinking_count:

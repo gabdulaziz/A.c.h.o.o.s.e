@@ -46,7 +46,7 @@ git clone https://github.com/gabdulaziz/a.c.h.o.o.s.e.git ~/achoose
 cd ~/achoose
 
 # 3. Download the candidate models (about 8 GB in total)
-ollama pull qwen3:4b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ollama pull qwen3.5:4b
 ollama pull llama3.2:3b
 

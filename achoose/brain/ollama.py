@@ -7,6 +7,7 @@ Uses only Python's standard library to talk to Ollama's HTTP API
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -15,6 +16,9 @@ from .base import BrainError, BrainReply, BrainStats, Message, ToolCall
 from .textcalls import extract_text_tool_calls
 
 _NS = 1_000_000_000  # Ollama reports durations in nanoseconds
+
+# Some models write their hidden reasoning into the answer between these tags.
+_THINK_TAGS = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL | re.IGNORECASE)
 
 
 class OllamaBrain:
@@ -67,7 +71,14 @@ class OllamaBrain:
                 raise
 
         msg = data.get("message") or {}
-        content = (msg.get("content") or "").strip()
+        content = msg.get("content") or ""
+        thinking = msg.get("thinking") or ""
+        if "<think>" in content.lower() or "</think>" in content.lower():
+            if "<think>" not in content.lower():  # opening tag was eaten by the template
+                content = "<think>" + content
+            thinking += "".join(_THINK_TAGS.findall(content))
+            content = _THINK_TAGS.sub("", content)
+        content = content.strip()
         calls = [_from_ollama_call(c) for c in msg.get("tool_calls") or []]
         from_text = False
         if tools and not calls:
@@ -78,7 +89,7 @@ class OllamaBrain:
         return BrainReply(
             content=content,
             tool_calls=calls,
-            thinking=(msg.get("thinking") or "").strip(),
+            thinking=thinking.strip(),
             tool_calls_from_text=from_text,
             stats=BrainStats(
                 prompt_tokens=data.get("prompt_eval_count", 0) or 0,
