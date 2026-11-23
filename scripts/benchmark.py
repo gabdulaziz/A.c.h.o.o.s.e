@@ -34,7 +34,7 @@ from achoose.brain import BrainError, Message, OllamaBrain  # noqa: E402
 from achoose.config import load_config  # noqa: E402
 from achoose.tools import ToolRegistry, builtin_tools  # noqa: E402
 
-DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "qwen3.5:4b", "llama3.2:3b"]
+DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "llama3.2:3b"]
 
 SPEED_PROMPT = "In about 120 words, explain why making regular backups of your files is important."
 

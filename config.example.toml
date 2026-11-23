@@ -3,7 +3,7 @@
 # Every line is optional; anything left out uses the default shown here.
 
 # The local model Achoose thinks with (must be downloaded: ollama pull <name>)
-model = "qwen3.5:4b"
+model = "qwen3:4b-instruct-2507-q4_K_M"
 
 # Where Ollama is running
 ollama_host = "http://localhost:11434"

@@ -10,7 +10,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 from .base import BrainError, BrainReply, BrainStats, Message, ToolCall
 from .textcalls import extract_text_tool_calls
@@ -47,11 +47,18 @@ class OllamaBrain:
 
     # ---- public -------------------------------------------------------
 
-    def chat(self, messages: list[Message], tools: list[dict[str, Any]]) -> BrainReply:
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None = None,
+    ) -> BrainReply:
+        """Ask the model. If on_text is given, the answer is passed to it piece
+        by piece while it is being written (streaming)."""
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [_to_ollama(m) for m in messages],
-            "stream": False,
+            "stream": on_text is not None,
             "keep_alive": self.keep_alive,
             "options": {"num_ctx": self.context_tokens, "temperature": self.temperature},
         }
@@ -60,13 +67,16 @@ class OllamaBrain:
         if self._send_think:
             body["think"] = self.think
 
+        send = (lambda: self._post_stream("/api/chat", body, on_text)) if on_text else (
+            lambda: self._post("/api/chat", body)
+        )
         try:
-            data = self._post("/api/chat", body)
+            data = send()
         except BrainError as err:
             if self._send_think and "think" in str(err).lower():
                 self._send_think = False
                 body.pop("think", None)
-                data = self._post("/api/chat", body)
+                data = send()
             else:
                 raise
 
@@ -126,9 +136,50 @@ class OllamaBrain:
         )
         return self._request(req)
 
-    def _request(self, req: urllib.request.Request) -> dict[str, Any]:
+    def _post_stream(
+        self, path: str, body: dict[str, Any], on_text: Callable[[str], None]
+    ) -> dict[str, Any]:
+        """Like _post, but reads the answer piece by piece and passes visible
+        text to on_text as it arrives. Returns the same shape as _post."""
+        req = urllib.request.Request(
+            self.host + path,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        shown = _StreamFilter(on_text)
+
+        def read(resp) -> dict[str, Any]:
+            content, thinking, calls, last = [], [], [], {}
+            for line in resp:
+                if not line.strip():
+                    continue
+                chunk = json.loads(line.decode("utf-8"))
+                if chunk.get("error"):
+                    raise BrainError(f"Ollama error: {chunk['error']}")
+                msg = chunk.get("message") or {}
+                if msg.get("thinking"):
+                    thinking.append(msg["thinking"])
+                if msg.get("tool_calls"):
+                    calls.extend(msg["tool_calls"])
+                if msg.get("content"):
+                    content.append(msg["content"])
+                    shown.feed(msg["content"])
+                last = chunk
+            last["message"] = {
+                "content": "".join(content),
+                "thinking": "".join(thinking),
+                "tool_calls": calls,
+            }
+            return last
+
+        return self._request(req, read)
+
+    def _request(self, req: urllib.request.Request, read=None) -> dict[str, Any]:
         try:
             with self._opener.open(req, timeout=self.timeout_seconds) as resp:
+                if read:
+                    return read(resp)
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")
@@ -145,6 +196,36 @@ class OllamaBrain:
             raise BrainError(
                 f"Cannot reach Ollama at {self.host} ({err}). Is it running? Try: ollama serve"
             ) from None
+
+
+class _StreamFilter:
+    """Decides what streamed text to show on screen.
+
+    Normal answers are shown as they arrive. If the answer starts like a
+    tool request written as text ([, {, ```) or hidden reasoning (<think>),
+    nothing is shown, because the brain will clean that up at the end.
+    """
+
+    def __init__(self, on_text: Callable[[str], None]) -> None:
+        self.on_text = on_text
+        self.decided: bool | None = None  # None = not sure yet
+        self.buffer = ""
+
+    def feed(self, piece: str) -> None:
+        if self.decided is False:
+            return
+        if self.decided:
+            self.on_text(piece)
+            return
+        self.buffer += piece
+        start = self.buffer.lstrip()
+        if not start:
+            return
+        if start[0] in "[{`<":
+            self.decided = False
+            return
+        self.decided = True
+        self.on_text(start)
 
 
 def _to_ollama(m: Message) -> dict[str, Any]:

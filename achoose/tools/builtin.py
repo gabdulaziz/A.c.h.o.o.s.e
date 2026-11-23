@@ -13,8 +13,10 @@ from pathlib import Path
 from ..config import Config
 from .base import Risk, Tool, ToolError
 
-MAX_LIST_ENTRIES = 100
-MAX_READ_BYTES = 20_000
+# Kept small on purpose: the model must read every line before it answers,
+# and on a laptop CPU that reading is slow.
+MAX_LIST_ENTRIES = 25
+MAX_READ_CHARS = 3_000
 
 
 def builtin_tools(config: Config) -> list[Tool]:
@@ -44,35 +46,40 @@ def builtin_tools(config: Config) -> list[Tool]:
             raise ToolError(f"{folder} does not exist.")
         if not folder.is_dir():
             raise ToolError(f"{folder} is a file, not a folder.")
-        entries = sorted(
-            (p for p in folder.iterdir() if not p.name.startswith(".")),
-            key=lambda p: (not p.is_dir(), p.name.lower()),
-        )
-        lines = []
-        for p in entries[:MAX_LIST_ENTRIES]:
-            if p.is_dir():
-                lines.append(f"[folder] {p.name}")
-            else:
-                try:
-                    size = p.stat().st_size
-                except OSError:
-                    size = 0
-                lines.append(f"[file]   {p.name} ({_human_size(size)})")
-        extra = len(entries) - MAX_LIST_ENTRIES
-        if extra > 0:
-            lines.append(f"... and {extra} more")
-        return f"{folder}:\n" + ("\n".join(lines) if lines else "(empty)")
+        entries = []
+        for p in folder.iterdir():
+            if p.name.startswith("."):
+                continue
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            entries.append((st.st_mtime, p.is_dir(), p.name, st.st_size))
+        if not entries:
+            return f"{folder} is empty."
+        entries.sort(reverse=True)  # most recently changed first
+        n_dirs = sum(1 for e in entries if e[1])
+        lines = [
+            f"{folder}: {len(entries)} items ({n_dirs} folders, {len(entries) - n_dirs} files)."
+        ]
+        if len(entries) > MAX_LIST_ENTRIES:
+            lines.append(f"The {MAX_LIST_ENTRIES} most recently changed:")
+        for mtime, is_dir, name, size in entries[:MAX_LIST_ENTRIES]:
+            day = datetime.fromtimestamp(mtime).strftime("%d %b")
+            lines.append(f"{name}/ ({day})" if is_dir else f"{name} ({_human_size(size)}, {day})")
+        return "\n".join(lines)
 
     def read_text_file(path: str) -> str:
         file = safe_path(path)
         if not file.is_file():
             raise ToolError(f"{file} is not a file.")
-        data = file.read_bytes()[:MAX_READ_BYTES]
+        with file.open("rb") as fh:
+            data = fh.read(MAX_READ_CHARS * 4)
         if b"\x00" in data:
             raise ToolError(f"{file.name} is not a text file.")
         text = data.decode("utf-8", errors="replace")
-        if file.stat().st_size > MAX_READ_BYTES:
-            text += f"\n\n[cut off: only the first {MAX_READ_BYTES // 1000} KB were read]"
+        if len(text) > MAX_READ_CHARS or file.stat().st_size > len(data):
+            text = text[:MAX_READ_CHARS] + "\n\n[cut off: only the beginning of the file was read]"
         return text
 
     # ---- CHANGE tools (always confirmed by the user) -------------------

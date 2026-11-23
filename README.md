@@ -45,16 +45,21 @@ sudo apt install -y git python3
 git clone https://github.com/gabdulaziz/a.c.h.o.o.s.e.git ~/achoose
 cd ~/achoose
 
-# 3. Download the candidate models (about 8 GB in total)
+# 3. Download Achoose's brain (about 2.5 GB)
 ollama pull qwen3:4b-instruct-2507-q4_K_M
-ollama pull qwen3.5:4b
-ollama pull llama3.2:3b
 
-# 4. Compare them (takes about 10-20 minutes)
-python3 scripts/benchmark.py
-
-# 5. Chat
+# 4. Chat
 python3 -m achoose
+```
+
+## Choosing the model
+
+`qwen3:4b-instruct-2507-q4_K_M` won our tests on an 8th-gen Intel laptop without a graphics card:
+8/8 tool tests at about 4.4 s per request, 3 GB of RAM. To compare it with other models later:
+
+```bash
+ollama pull llama3.2:3b
+python3 scripts/benchmark.py qwen3:4b-instruct-2507-q4_K_M llama3.2:3b
 ```
 
 To use a different model, either run `ACHOOSE_MODEL=llama3.2:3b python3 -m achoose`, or copy

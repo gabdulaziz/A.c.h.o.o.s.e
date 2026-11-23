@@ -25,7 +25,7 @@ CONFIG_PATH = Path(os.environ.get("ACHOOSE_CONFIG", "~/.config/achoose/config.to
 @dataclass
 class Config:
     # Brain
-    model: str = "qwen3.5:4b"
+    model: str = "qwen3:4b-instruct-2507-q4_K_M"
     ollama_host: str = "http://localhost:11434"
     context_tokens: int = 4096
     temperature: float = 0.2

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any
 
 from .agent import Agent
@@ -19,6 +20,7 @@ HELP = """Commands:
 
 
 def ask_user_to_confirm(tool: Tool, arguments: dict[str, Any]) -> bool:
+    stream.end_line()
     print("\n  ⚠  Achoose wants to do this:")
     for line in tool.describe(arguments).splitlines():
         print(f"     {line}")
@@ -32,7 +34,32 @@ def ask_user_to_confirm(tool: Tool, arguments: dict[str, Any]) -> bool:
     return allowed
 
 
+class Stream:
+    """Prints the answer as it is written, and keeps tool lines tidy."""
+
+    def __init__(self) -> None:
+        self.streaming = False  # are we in the middle of printing an answer?
+
+    def text(self, piece: str) -> None:
+        if not self.streaming:
+            print("Achoose: ", end="")
+            self.streaming = True
+        print(piece, end="", flush=True)
+
+    def end_line(self) -> bool:
+        """Finish the current answer line. Returns True if anything was printed."""
+        was = self.streaming
+        if was:
+            print()
+        self.streaming = False
+        return was
+
+
+stream = Stream()
+
+
 def show_tool_step(name: str, arguments: dict[str, Any], result: str) -> None:
+    stream.end_line()
     args = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
     first_line = result.splitlines()[0] if result else ""
     if len(first_line) > 80:
@@ -100,15 +127,20 @@ def main() -> int:
             continue
 
         print("  (thinking...)", flush=True)
+        started = time.perf_counter()
         try:
-            answer = agent.ask(text)
+            answer = agent.ask(text, on_text=stream.text)
         except BrainError as err:
-            print(f"\n[problem] {err}")
+            stream.end_line()
+            print(f"[problem] {err}")
             continue
         except KeyboardInterrupt:
-            print("\n(stopped)")
+            stream.end_line()
+            print("(stopped)")
             continue
-        print(f"Achoose: {answer or '(no answer)'}")
+        if not stream.end_line():  # nothing was shown live, so show it now
+            print(f"Achoose: {answer or '(no answer)'}")
+        print(f"  ({time.perf_counter() - started:.1f} s)")
 
 
 def print_stats(agent: Agent) -> None:

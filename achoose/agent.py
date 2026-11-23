@@ -51,13 +51,15 @@ class Agent:
     def reset(self) -> None:
         self.history.clear()
 
-    def ask(self, text: str) -> str:
+    def ask(self, text: str, on_text: Callable[[str], None] | None = None) -> str:
+        """Answer one message. on_text, if given, receives the answer as it is written."""
         self.history.append(Message("user", text))
         self._trim_history()
         self.last_stats = []
 
         for _ in range(self.max_tool_rounds + 1):
-            reply = self.brain.chat(self._messages(), self.tools.schemas())
+            extra = {"on_text": on_text} if on_text else {}
+            reply = self.brain.chat(self._messages(), self.tools.schemas(), **extra)
             self.last_stats.append(reply.stats)
             self.history.append(Message("assistant", reply.content, tool_calls=reply.tool_calls))
             if not reply.tool_calls:

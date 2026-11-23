@@ -123,6 +123,28 @@ class AgentTests(unittest.TestCase):
         self.assertLessEqual(len(agent.history), 6)
         self.assertEqual(agent.history[0].role, "user")
 
+    def test_folder_list_is_short_and_newest_first(self):
+        import os
+
+        big = self.root / "docs" / "big"
+        big.mkdir()
+        for i in range(40):
+            f = big / f"file{i:02}.txt"
+            f.write_text("x")
+            os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
+        out = self.tools.get("list_folder").run(path=str(big))
+        lines = out.splitlines()
+        self.assertIn("40 items", lines[0])
+        self.assertEqual(len(lines), 2 + 25)
+        self.assertTrue(lines[2].startswith("file39.txt"))
+
+    def test_long_file_is_cut(self):
+        long = self.root / "docs" / "long.txt"
+        long.write_text("a" * 10_000)
+        out = self.tools.get("read_text_file").run(path=str(long))
+        self.assertLess(len(out), 3_200)
+        self.assertIn("cut off", out)
+
     def test_only_save_note_needs_confirmation(self):
         risky = [t.name for t in self.tools if t.risk is not Risk.READ]
         self.assertEqual(risky, ["save_note"])
@@ -137,6 +159,21 @@ class FakeOllama(BaseHTTPRequestHandler):
         if body["model"] == "texty":
             self._send(200, {"message": {"role": "assistant", "thinking": "hmm", "content":
                 '[{"type":"function","function":{"name":"get_current_time","arguments":{}}}]'}})
+            return
+        if body["model"] in ("streamer", "jsonstreamer") and body["stream"]:
+            if body["model"] == "streamer":
+                pieces = ["Hel", "lo ", "there."]
+            else:
+                pieces = ['[{"type":"function",', '"function":{"name":"get_current_time","arguments":{}}}]']
+            lines = [{"message": {"role": "assistant", "content": p}, "done": False} for p in pieces]
+            lines.append({"message": {"role": "assistant", "content": ""}, "done": True, "eval_count": 3,
+                          "eval_duration": 1_000_000_000})
+            raw = "".join(json.dumps(x) + "\n" for x in lines).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
             return
         if body["model"] == "thinker":
             self._send(200, {"message": {"role": "assistant", "content": "Let me see...\n</think>\n\nParis."}})
@@ -219,6 +256,22 @@ class OllamaBrainTests(unittest.TestCase):
         reply = OllamaBrain("thinker", host=self.host).chat([Message("user", "capital?")], [])
         self.assertEqual(reply.content, "Paris.")
         self.assertIn("Let me see", reply.thinking)
+
+    def test_streaming_shows_text_as_it_arrives(self):
+        shown = []
+        reply = OllamaBrain("streamer", host=self.host).chat([Message("user", "hi")], [], on_text=shown.append)
+        self.assertEqual(shown, ["Hel", "lo ", "there."])
+        self.assertEqual(reply.content, "Hello there.")
+        self.assertEqual(reply.stats.output_tokens, 3)
+
+    def test_streaming_hides_tool_requests_written_as_text(self):
+        shown = []
+        tools = [{"type": "function", "function": {"name": "get_current_time"}}]
+        reply = OllamaBrain("jsonstreamer", host=self.host).chat(
+            [Message("user", "time?")], tools, on_text=shown.append
+        )
+        self.assertEqual(shown, [])
+        self.assertEqual(reply.tool_calls[0].name, "get_current_time")
 
     def test_missing_model_gives_pull_hint(self):
         with self.assertRaisesRegex(BrainError, "ollama pull missing"):

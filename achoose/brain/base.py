@@ -8,7 +8,7 @@ later) without touching the rest of the code.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 @dataclass
@@ -84,5 +84,11 @@ class Brain(Protocol):
 
     name: str
 
-    def chat(self, messages: list[Message], tools: list[dict[str, Any]]) -> BrainReply:
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None = None,
+    ) -> BrainReply:
+        """Answer. If on_text is given, pass visible text to it as it is written."""
         ...
