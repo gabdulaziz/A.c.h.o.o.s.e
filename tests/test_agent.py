@@ -1,0 +1,211 @@
+"""Tests that run without Ollama. Run:  python3 -m unittest -v"""
+
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+from achoose.agent import Agent
+from achoose.brain import BrainError, BrainReply, Message, OllamaBrain, ToolCall
+from achoose.config import Config
+from achoose.tools import Risk, ToolRegistry, builtin_tools
+
+
+class ScriptedBrain:
+    """A fake brain that replies from a list, and records what it was sent."""
+
+    name = "scripted"
+
+    def __init__(self, replies: list[BrainReply]) -> None:
+        self.replies = list(replies)
+        self.seen: list[list[Message]] = []
+
+    def chat(self, messages, tools):
+        self.seen.append(list(messages))
+        return self.replies.pop(0)
+
+
+def call(name: str, **args) -> BrainReply:
+    return BrainReply("", tool_calls=[ToolCall(name, args)])
+
+
+class AgentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "docs").mkdir()
+        (root / "docs" / "todo.txt").write_text("buy milk")
+        self.root = root.resolve()
+        self.config = Config(data_dir=root / "data", read_folders=[root / "docs"])
+        self.tools = ToolRegistry(builtin_tools(self.config))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def agent(self, replies, confirm=None) -> tuple[Agent, ScriptedBrain]:
+        brain = ScriptedBrain(replies)
+        kwargs = {"confirm": confirm} if confirm else {}
+        return Agent(brain, self.tools, **kwargs), brain
+
+    def last_tool_result(self, brain: ScriptedBrain) -> str:
+        return [m for m in brain.seen[-1] if m.role == "tool"][-1].content
+
+    def test_plain_answer(self):
+        agent, _ = self.agent([BrainReply("Hello!")])
+        self.assertEqual(agent.ask("hi"), "Hello!")
+
+    def test_read_tool_runs_without_asking(self):
+        asked = []
+        agent, brain = self.agent(
+            [call("read_text_file", path=str(self.root / "docs/todo.txt")), BrainReply("It says buy milk.")],
+            confirm=lambda t, a: asked.append(t.name) or False,
+        )
+        self.assertEqual(agent.ask("read my todo"), "It says buy milk.")
+        self.assertEqual(asked, [])
+        self.assertEqual(self.last_tool_result(brain), "buy milk")
+
+    def test_change_tool_declined_does_nothing(self):
+        agent, brain = self.agent(
+            [call("save_note", title="x", text="y"), BrainReply("Okay, not saved.")],
+            confirm=lambda t, a: False,
+        )
+        agent.ask("note this")
+        self.assertIn("declined", self.last_tool_result(brain))
+        self.assertFalse((self.root / "data" / "notes").exists())
+
+    def test_change_tool_default_is_deny(self):
+        agent, brain = self.agent([call("save_note", title="x", text="y"), BrainReply("ok")])
+        agent.ask("note this")
+        self.assertFalse((self.root / "data" / "notes").exists())
+
+    def test_change_tool_allowed_runs(self):
+        agent, brain = self.agent(
+            [call("save_note", title="Shopping List", text="milk"), BrainReply("Saved.")],
+            confirm=lambda t, a: True,
+        )
+        agent.ask("note this")
+        notes = list((self.root / "data" / "notes").glob("*-shopping-list.md"))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("milk", notes[0].read_text())
+
+    def test_reading_outside_allowed_folders_is_refused(self):
+        agent, brain = self.agent([call("read_text_file", path="/etc/passwd"), BrainReply("Can't.")])
+        agent.ask("read passwd")
+        self.assertIn("Not allowed", self.last_tool_result(brain))
+
+    def test_path_trick_is_refused(self):
+        sneaky = str(self.root / "docs" / ".." / "data")
+        agent, brain = self.agent([call("list_folder", path=sneaky), BrainReply("no")])
+        agent.ask("list")
+        self.assertIn("Not allowed", self.last_tool_result(brain))
+
+    def test_unknown_tool_and_bad_arguments(self):
+        agent, brain = self.agent([call("format_disk"), call("list_folder", folder="x"), BrainReply("hm")])
+        agent.ask("go")
+        tool_msgs = [m.content for m in brain.seen[-1] if m.role == "tool"]
+        self.assertIn("no tool called", tool_msgs[0])
+        self.assertIn("wrong arguments", tool_msgs[1])
+
+    def test_stops_after_too_many_tool_rounds(self):
+        agent, _ = self.agent([call("get_current_time")] * 10)
+        agent.max_tool_rounds = 2
+        self.assertIn("too many steps", agent.ask("loop"))
+
+    def test_history_is_trimmed_at_a_user_message(self):
+        agent, _ = self.agent([BrainReply("a")] * 20)
+        agent.history_messages = 5
+        for i in range(10):
+            agent.ask(f"q{i}")
+        self.assertLessEqual(len(agent.history), 6)
+        self.assertEqual(agent.history[0].role, "user")
+
+    def test_only_save_note_needs_confirmation(self):
+        risky = [t.name for t in self.tools if t.risk is not Risk.READ]
+        self.assertEqual(risky, ["save_note"])
+
+
+class FakeOllama(BaseHTTPRequestHandler):
+    last_body: dict = {}
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeOllama.last_body = body
+        if body["model"] == "missing":
+            self._send(404, {"error": f"model '{body['model']}' not found"})
+            return
+        self._send(
+            200,
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "get_current_time", "arguments": {}}}],
+                },
+                "eval_count": 50,
+                "eval_duration": 5_000_000_000,
+                "prompt_eval_count": 100,
+                "prompt_eval_duration": 1_000_000_000,
+            },
+        )
+
+    def _send(self, code, data):
+        raw = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def log_message(self, *args):
+        pass
+
+
+class OllamaBrainTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = HTTPServer(("127.0.0.1", 0), FakeOllama)
+        cls.host = f"http://127.0.0.1:{cls.server.server_port}"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def test_parses_tool_calls_and_speed(self):
+        brain = OllamaBrain("test", host=self.host)
+        reply = brain.chat([Message("user", "time?")], [{"type": "function"}])
+        self.assertEqual(reply.tool_calls[0].name, "get_current_time")
+        self.assertEqual(reply.stats.output_tokens_per_second, 10.0)
+        self.assertEqual(FakeOllama.last_body["think"], False)
+        self.assertFalse(FakeOllama.last_body["stream"])
+
+    def test_sends_tool_results_back(self):
+        brain = OllamaBrain("test", host=self.host)
+        brain.chat(
+            [
+                Message("assistant", "", tool_calls=[ToolCall("get_current_time", {})]),
+                Message("tool", "Monday", tool_name="get_current_time"),
+            ],
+            [],
+        )
+        msgs = FakeOllama.last_body["messages"]
+        self.assertEqual(msgs[0]["tool_calls"][0]["function"]["name"], "get_current_time")
+        self.assertEqual(msgs[1], {"role": "tool", "content": "Monday", "tool_name": "get_current_time"})
+
+    def test_missing_model_gives_pull_hint(self):
+        with self.assertRaisesRegex(BrainError, "ollama pull missing"):
+            OllamaBrain("missing", host=self.host).chat([Message("user", "hi")], [])
+
+    def test_not_running_gives_clear_error(self):
+        brain = OllamaBrain("x", host="http://127.0.0.1:9", timeout_seconds=2)
+        self.assertFalse(brain.is_running())
+        with self.assertRaisesRegex(BrainError, "Cannot reach Ollama"):
+            brain.chat([Message("user", "hi")], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,71 @@
+# Achoose
+
+A private personal assistant that runs on your own computer, with its own local brain.
+
+This is the first step: a text chat in the terminal that can use a few simple tools,
+and a benchmark to choose the best small model for your laptop.
+
+## The safety rule
+
+* **Reading is automatic.** Achoose may look at the time, list folders and read text files
+  inside the folders you allow (your home folder by default).
+* **Changing things always asks you first.** Saving, sending, deleting, installing or running
+  anything waits for you to type `y`. If you press Enter or anything else, nothing happens.
+
+## How it is built
+
+```
+achoose/
+  brain/        the "brain" interface; any model plugs in here
+    base.py       what every brain must do (chat, ask for tools)
+    ollama.py     the local brain, a model running in Ollama
+  tools/        things Achoose can do
+    base.py       what a tool is, and its risk level (READ or CHANGE)
+    builtin.py    time, list folder, read file, save note
+  agent.py      the thinking loop and the confirmation gate
+  config.py     settings (see config.example.toml)
+  cli.py        the text chat in your terminal
+scripts/
+  benchmark.py  compares models on your computer
+tests/          checks that run without Ollama
+```
+
+The brain is swappable: everything talks to the `Brain` interface, so a cloud model
+(used only when you ask, for hard jobs) can be added later without changing anything else.
+Nothing here uses the internet, and there are no extra Python packages to install.
+
+## Setup on Ubuntu
+
+```bash
+# 1. Install Ollama (runs local models)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Get the code
+sudo apt install -y git python3
+git clone https://github.com/gabdulaziz/a.c.h.o.o.s.e.git ~/achoose
+cd ~/achoose
+
+# 3. Download the candidate models (about 7.5 GB in total)
+ollama pull qwen3.5:4b
+ollama pull phi4-mini
+ollama pull llama3.2:3b
+
+# 4. Compare them (takes about 10-20 minutes)
+python3 scripts/benchmark.py
+
+# 5. Chat
+python3 -m achoose
+```
+
+To use a different model, either run `ACHOOSE_MODEL=llama3.2:3b python3 -m achoose`, or copy
+`config.example.toml` to `~/.config/achoose/config.toml` and change `model`.
+
+## Chat commands
+
+`/help`, `/tools`, `/stats` (speed of the last answer), `/reset` (forget the chat), `/quit`.
+
+## Running the tests
+
+```bash
+python3 -m unittest -v
+```

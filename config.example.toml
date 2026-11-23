@@ -1,0 +1,30 @@
+# Achoose settings.
+# Copy this file to ~/.config/achoose/config.toml and change what you need.
+# Every line is optional; anything left out uses the default shown here.
+
+# The local model Achoose thinks with (must be downloaded: ollama pull <name>)
+model = "qwen3.5:4b"
+
+# Where Ollama is running
+ollama_host = "http://localhost:11434"
+
+# How much text the model can see at once. Bigger = slower on a laptop.
+context_tokens = 4096
+
+# 0 = very predictable answers, 1 = more creative
+temperature = 0.2
+
+# Some models have a slow "thinking" mode. Off keeps answers fast.
+think = false
+
+# Where Achoose keeps its own files (notes now, memory later)
+data_dir = "~/Achoose"
+
+# Folders Achoose may read without asking. Reading elsewhere is refused.
+read_folders = ["~"]
+
+# How many past messages Achoose remembers within one chat
+history_messages = 20
+
+# Safety limit on tool steps for a single question
+max_tool_rounds = 5
