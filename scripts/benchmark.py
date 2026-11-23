@@ -87,7 +87,15 @@ class Result:
     tool_total: int = 0
     tool_avg_seconds: float = 0.0
     ram_gb: float = 0.0
+    # Where the time goes, averaged over the tool tests
+    avg_read_tokens: float = 0.0
+    avg_read_seconds: float = 0.0
+    avg_write_tokens: float = 0.0
+    avg_write_seconds: float = 0.0
+    thinking_count: int = 0  # answers where the model "thought" first (slow)
+    text_rescues: int = 0  # tool requests rescued from plain text
     failures: list[str] = field(default_factory=list)
+    cases: list[dict[str, Any]] = field(default_factory=list)
 
 
 def unload(brain: OllamaBrain) -> None:
@@ -99,12 +107,17 @@ def unload(brain: OllamaBrain) -> None:
 
 def loaded_ram_gb(brain: OllamaBrain) -> float:
     try:
+        want = _full_name(brain.model)
         for m in brain._get("/api/ps").get("models", []):
-            if m.get("name") == brain.model or m.get("model") == brain.model:
+            if want in (_full_name(m.get("name", "")), _full_name(m.get("model", ""))):
                 return round(m.get("size", 0) / 1024**3, 1)
     except BrainError:
         pass
     return 0.0
+
+
+def _full_name(name: str) -> str:
+    return name if ":" in name else f"{name}:latest"
 
 
 def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
@@ -113,9 +126,10 @@ def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
     system = Message("system", SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y")))
 
     try:
-        # 1. Wake the model up (measures load time)
+        # 1. Wake the model up (measures load time). This also lets Ollama
+        #    remember the instructions + tool list, as it does in a real chat.
         print("  loading...", flush=True)
-        warm = brain.chat([Message("user", "Say OK.")], [])
+        warm = brain.chat([system, Message("user", "Say OK.")], schemas)
         res.load_seconds = round(warm.stats.load_seconds, 1)
         res.ram_gb = loaded_ram_gb(brain)
 
@@ -140,7 +154,23 @@ def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
             print(f"  tool test {i}/{len(CASES)}: {case.prompt}", flush=True)
             t0 = time.perf_counter()
             r = brain.chat([system, Message("user", case.prompt)], schemas)
-            total_time += time.perf_counter() - t0
+            seconds = time.perf_counter() - t0
+            total_time += seconds
+            st = r.stats
+            res.cases.append(
+                {
+                    "prompt": case.prompt,
+                    "seconds": round(seconds, 1),
+                    "read_tokens": st.prompt_tokens,
+                    "read_seconds": round(st.prompt_seconds, 1),
+                    "write_tokens": st.output_tokens,
+                    "write_seconds": round(st.output_seconds, 1),
+                    "thinking_chars": len(r.thinking),
+                    "tool_from_text": r.tool_calls_from_text,
+                }
+            )
+            res.thinking_count += bool(r.thinking)
+            res.text_rescues += r.tool_calls_from_text
             called = r.tool_calls[0] if r.tool_calls else None
             if case.expect_tool is None:
                 passed = called is None
@@ -157,6 +187,11 @@ def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
             else:
                 res.failures.append(f"{case.prompt} -> wanted {case.expect_tool or 'no tool'}, got {got}")
         res.tool_avg_seconds = round(total_time / len(CASES), 1)
+        n = len(res.cases)
+        res.avg_read_tokens = round(sum(c["read_tokens"] for c in res.cases) / n)
+        res.avg_read_seconds = round(sum(c["read_seconds"] for c in res.cases) / n, 1)
+        res.avg_write_tokens = round(sum(c["write_tokens"] for c in res.cases) / n)
+        res.avg_write_seconds = round(sum(c["write_seconds"] for c in res.cases) / n, 1)
     except BrainError as err:
         res.ok = False
         res.error = str(err)
@@ -178,6 +213,19 @@ def print_table(results: list[Result]) -> None:
             f"{r.prompt_tokens_per_second:>12}{f'{r.tool_score}/{r.tool_total}':>8}"
             f"{r.tool_avg_seconds:>11}{r.ram_gb:>8}"
         )
+    print("\nWhere the time goes (average per tool test):")
+    for r in results:
+        if not r.ok:
+            continue
+        line = (
+            f"  {r.model:<16} reading {r.avg_read_tokens} tokens took {r.avg_read_seconds}s, "
+            f"writing {r.avg_write_tokens} tokens took {r.avg_write_seconds}s"
+        )
+        if r.thinking_count:
+            line += f"  <- 'thinking' in {r.thinking_count}/{r.tool_total} answers (slow)"
+        if r.text_rescues:
+            line += f"  ({r.text_rescues} tool requests rescued from plain text)"
+        print(line)
     for r in results:
         if r.ok and r.failures:
             print(f"\n{r.model} missed:")

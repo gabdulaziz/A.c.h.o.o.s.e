@@ -134,6 +134,10 @@ class FakeOllama(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         FakeOllama.last_body = body
+        if body["model"] == "texty":
+            self._send(200, {"message": {"role": "assistant", "thinking": "hmm", "content":
+                '[{"type":"function","function":{"name":"get_current_time","arguments":{}}}]'}})
+            return
         if body["model"] == "missing":
             self._send(404, {"error": f"model '{body['model']}' not found"})
             return
@@ -195,6 +199,18 @@ class OllamaBrainTests(unittest.TestCase):
         msgs = FakeOllama.last_body["messages"]
         self.assertEqual(msgs[0]["tool_calls"][0]["function"]["name"], "get_current_time")
         self.assertEqual(msgs[1], {"role": "tool", "content": "Monday", "tool_name": "get_current_time"})
+
+    def test_rescues_tool_call_written_as_text(self):
+        tools = [{"type": "function", "function": {"name": "get_current_time"}}]
+        reply = OllamaBrain("texty", host=self.host).chat([Message("user", "time?")], tools)
+        self.assertEqual(reply.tool_calls[0].name, "get_current_time")
+        self.assertTrue(reply.tool_calls_from_text)
+        self.assertEqual(reply.content, "")
+        self.assertEqual(reply.thinking, "hmm")
+
+    def test_no_rescue_when_no_tools_offered(self):
+        reply = OllamaBrain("texty", host=self.host).chat([Message("user", "time?")], [])
+        self.assertEqual(reply.tool_calls, [])
 
     def test_missing_model_gives_pull_hint(self):
         with self.assertRaisesRegex(BrainError, "ollama pull missing"):

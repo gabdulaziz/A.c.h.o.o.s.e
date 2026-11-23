@@ -98,38 +98,38 @@ def builtin_tools(config: Config) -> list[Tool]:
     return [
         Tool(
             name="get_current_time",
-            description="Get the current date, day of the week and time.",
+            description="Current date, weekday and time. Only when the user asks about the time or date.",
             run=get_current_time,
         ),
         Tool(
             name="list_folder",
-            description="List the files and folders inside a folder on the user's computer.",
+            description="List what is inside a folder on this computer.",
             run=list_folder,
             parameters={
                 "path": {
                     "type": "string",
-                    "description": "Folder path, for example ~/Documents or ~/Downloads",
+                    "description": "Folder, e.g. ~/Downloads",
                 }
             },
             required=["path"],
         ),
         Tool(
             name="read_text_file",
-            description="Read the text inside a file (notes, code, .txt, .md, .csv and so on).",
+            description="Read a text file on this computer.",
             run=read_text_file,
             parameters={
-                "path": {"type": "string", "description": "File path, for example ~/notes/todo.txt"}
+                "path": {"type": "string", "description": "File, e.g. ~/notes/todo.txt"}
             },
             required=["path"],
         ),
         Tool(
             name="save_note",
-            description="Save a new note for the user. Use when the user asks to note, write down or remember something.",
+            description="Save a note. Only when the user explicitly asks to save, note or write something down.",
             run=save_note,
             risk=Risk.CHANGE,
             parameters={
-                "title": {"type": "string", "description": "Short title of the note"},
-                "text": {"type": "string", "description": "The full text of the note"},
+                "title": {"type": "string", "description": "Short title"},
+                "text": {"type": "string", "description": "Note text"},
             },
             required=["title", "text"],
             explain=explain_save_note,

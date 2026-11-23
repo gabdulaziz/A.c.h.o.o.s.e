@@ -65,6 +65,10 @@ class BrainReply:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     stats: BrainStats = field(default_factory=BrainStats)
+    # Hidden "thinking" text, if the model produced any (it costs time)
+    thinking: str = ""
+    # True when the tool request was rescued from plain text (see textcalls.py)
+    tool_calls_from_text: bool = False
 
 
 class BrainError(RuntimeError):

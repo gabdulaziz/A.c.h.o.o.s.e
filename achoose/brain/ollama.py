@@ -12,6 +12,7 @@ import urllib.request
 from typing import Any
 
 from .base import BrainError, BrainReply, BrainStats, Message, ToolCall
+from .textcalls import extract_text_tool_calls
 
 _NS = 1_000_000_000  # Ollama reports durations in nanoseconds
 
@@ -66,9 +67,19 @@ class OllamaBrain:
                 raise
 
         msg = data.get("message") or {}
+        content = (msg.get("content") or "").strip()
+        calls = [_from_ollama_call(c) for c in msg.get("tool_calls") or []]
+        from_text = False
+        if tools and not calls:
+            names = {t.get("function", {}).get("name") for t in tools}
+            calls, content = extract_text_tool_calls(content, names)
+            from_text = bool(calls)
+
         return BrainReply(
-            content=(msg.get("content") or "").strip(),
-            tool_calls=[_from_ollama_call(c) for c in msg.get("tool_calls") or []],
+            content=content,
+            tool_calls=calls,
+            thinking=(msg.get("thinking") or "").strip(),
+            tool_calls_from_text=from_text,
             stats=BrainStats(
                 prompt_tokens=data.get("prompt_eval_count", 0) or 0,
                 output_tokens=data.get("eval_count", 0) or 0,
