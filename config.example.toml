@@ -14,6 +14,9 @@ context_tokens = 4096
 # 0 = very predictable answers, 1 = more creative
 temperature = 0.2
 
+# Longest answer allowed, in tokens (~3/4 of a word). 400 is about a minute on a laptop.
+max_answer_tokens = 400
+
 # Some models have a slow "thinking" mode. Off keeps answers fast.
 think = false
 

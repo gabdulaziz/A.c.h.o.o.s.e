@@ -29,6 +29,7 @@ class Config:
     ollama_host: str = "http://localhost:11434"
     context_tokens: int = 4096
     temperature: float = 0.2
+    max_answer_tokens: int = 400  # about 1 minute of writing on a laptop CPU
     think: bool = False  # slow "thinking" mode of some models; off for speed
 
     # Where Achoose keeps its own files (notes, later memory)

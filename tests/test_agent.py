@@ -123,6 +123,14 @@ class AgentTests(unittest.TestCase):
         self.assertLessEqual(len(agent.history), 6)
         self.assertEqual(agent.history[0].role, "user")
 
+    def test_folder_list_is_shown_directly_without_second_brain_call(self):
+        agent, brain = self.agent([call("list_folder", path=str(self.root / "docs"))])
+        answer = agent.ask("what's in docs?")
+        self.assertIn("todo.txt", answer)
+        self.assertEqual(len(brain.seen), 1)  # the brain was not asked to re-write the list
+        self.assertEqual(agent.history[-1].role, "assistant")
+        self.assertIn("todo.txt", agent.history[-2].content)  # still known for follow-ups
+
     def test_folder_list_is_short_and_newest_first(self):
         import os
 
@@ -226,6 +234,7 @@ class OllamaBrainTests(unittest.TestCase):
         self.assertEqual(reply.stats.output_tokens_per_second, 10.0)
         self.assertEqual(FakeOllama.last_body["think"], False)
         self.assertFalse(FakeOllama.last_body["stream"])
+        self.assertEqual(FakeOllama.last_body["options"]["num_predict"], 400)
 
     def test_sends_tool_results_back(self):
         brain = OllamaBrain("test", host=self.host)

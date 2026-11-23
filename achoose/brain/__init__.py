@@ -31,6 +31,7 @@ def make_brain(config: Config, kind: str = "local") -> Brain:
             host=config.ollama_host,
             context_tokens=config.context_tokens,
             temperature=config.temperature,
+            max_answer_tokens=config.max_answer_tokens,
             think=config.think,
         )
     if kind == "cloud":

@@ -112,6 +112,7 @@ def builtin_tools(config: Config) -> list[Tool]:
             name="list_folder",
             description="List what is inside a folder on this computer.",
             run=list_folder,
+            show_directly=True,
             parameters={
                 "path": {
                     "type": "string",

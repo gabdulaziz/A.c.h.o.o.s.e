@@ -20,6 +20,7 @@ ToolEventFn = Callable[[str, dict[str, Any], str], None]
 SYSTEM_PROMPT = """You are Achoose, a private assistant on the user's own computer. Be warm and brief. Reply in the user's language.
 Use a tool ONLY when the request needs facts from this computer (the time, a folder, a file) or the user clearly asks to save a note.
 For greetings, general knowledge, advice or writing text, answer directly with no tool.
+Keep answers to a few sentences unless the user asks for more. Never repeat lists or file contents the user can already see.
 Never invent file contents or results. If a tool fails or the user declines, say so.
 Today is {today}."""
 
@@ -64,9 +65,17 @@ class Agent:
             self.history.append(Message("assistant", reply.content, tool_calls=reply.tool_calls))
             if not reply.tool_calls:
                 return reply.content
+            shown: list[str] = []
             for call in reply.tool_calls:
-                result = self._run_tool(call)
+                result, ok = self._run_tool(call)
                 self.history.append(Message("tool", result, tool_name=call.name))
+                tool = self.tools.get(call.name)
+                shown.append(result if ok and tool and tool.show_directly else "")
+            if all(shown):
+                # Every result can be shown as it is: skip the slow re-writing step.
+                # The brain still has the results in the history for follow-ups.
+                self.history.append(Message("assistant", "(The result above was shown to the user.)"))
+                return "\n\n".join(shown)
 
         answer = "I stopped because that took too many steps. Could you ask in a simpler way?"
         self.history.append(Message("assistant", answer))
@@ -74,7 +83,9 @@ class Agent:
 
     # ---- internals ----------------------------------------------------
 
-    def _run_tool(self, call: ToolCall) -> str:
+    def _run_tool(self, call: ToolCall) -> tuple[str, bool]:
+        """Run one tool through the safety gate. Returns (result, worked)."""
+        ok = False
         tool = self.tools.get(call.name)
         if tool is None:
             result = f"Error: there is no tool called '{call.name}'."
@@ -83,6 +94,7 @@ class Agent:
         else:
             try:
                 result = tool.run(**call.arguments)
+                ok = True
             except ToolError as err:
                 result = f"Error: {err}"
             except TypeError as err:  # wrong or missing arguments from the model
@@ -91,7 +103,7 @@ class Agent:
                 result = f"Error: {err.strerror or err}"
         if self.on_tool:
             self.on_tool(call.name, call.arguments, result)
-        return result
+        return result, ok
 
     def _messages(self) -> list[Message]:
         system = SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y"))

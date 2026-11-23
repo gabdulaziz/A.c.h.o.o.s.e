@@ -34,6 +34,9 @@ class Tool:
     required: list[str] = field(default_factory=list)
     # Optional: turns arguments into a plain sentence for the confirmation question
     explain: Callable[..., str] | None = None
+    # True: the result is shown to the user as it is, and the brain is not
+    # asked to re-write it (writing is slow on a laptop). Used for lists.
+    show_directly: bool = False
 
     def schema(self) -> dict[str, Any]:
         return {

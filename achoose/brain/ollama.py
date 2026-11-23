@@ -28,6 +28,7 @@ class OllamaBrain:
         host: str = "http://localhost:11434",
         context_tokens: int = 4096,
         temperature: float = 0.2,
+        max_answer_tokens: int = 400,
         keep_alive: str = "30m",
         think: bool = False,
         timeout_seconds: float = 600,
@@ -37,6 +38,7 @@ class OllamaBrain:
         self.host = host.rstrip("/")
         self.context_tokens = context_tokens
         self.temperature = temperature
+        self.max_answer_tokens = max_answer_tokens
         self.keep_alive = keep_alive
         self.think = think
         self.timeout_seconds = timeout_seconds
@@ -60,7 +62,11 @@ class OllamaBrain:
             "messages": [_to_ollama(m) for m in messages],
             "stream": on_text is not None,
             "keep_alive": self.keep_alive,
-            "options": {"num_ctx": self.context_tokens, "temperature": self.temperature},
+            "options": {
+                "num_ctx": self.context_tokens,
+                "temperature": self.temperature,
+                "num_predict": self.max_answer_tokens,  # safety cap on answer length
+            },
         }
         if tools:
             body["tools"] = tools
