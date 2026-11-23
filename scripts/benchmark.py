@@ -9,7 +9,7 @@ For each model it measures:
 
 Run from the project folder:
     python3 scripts/benchmark.py                      # the default candidates
-    python3 scripts/benchmark.py llama3.2:3b phi4-mini # your own choice
+    python3 scripts/benchmark.py llama3.2:3b qwen3:4b  # your own choice
 
 Models must be downloaded first (ollama pull <name>). Nothing is run on your
 files: tool requests are only checked, never carried out.
@@ -34,7 +34,7 @@ from achoose.brain import BrainError, Message, OllamaBrain  # noqa: E402
 from achoose.config import load_config  # noqa: E402
 from achoose.tools import ToolRegistry, builtin_tools  # noqa: E402
 
-DEFAULT_MODELS = ["qwen3.5:4b", "phi4-mini", "llama3.2:3b"]
+DEFAULT_MODELS = ["qwen3:4b", "qwen3.5:4b", "llama3.2:3b"]
 
 SPEED_PROMPT = "In about 120 words, explain why making regular backups of your files is important."
 
@@ -44,6 +44,8 @@ class Case:
     prompt: str
     expect_tool: str | None  # None means: should answer without any tool
     check_args: Callable[[dict[str, Any]], bool] = lambda a: True
+    # Some questions may also be answered correctly without a tool
+    ok_without_tool: Callable[[str], bool] | None = None
 
 
 def _text(args: dict[str, Any], key: str) -> str:
@@ -52,7 +54,12 @@ def _text(args: dict[str, Any], key: str) -> str:
 
 CASES = [
     Case("What time is it right now?", "get_current_time"),
-    Case("Which day of the week is it today?", "get_current_time"),
+    # Achoose tells the model today's date, so a correct direct answer is fine too.
+    Case(
+        "Which day of the week is it today?",
+        "get_current_time",
+        ok_without_tool=lambda text: datetime.now().strftime("%A").lower() in text.lower(),
+    ),
     Case(
         "What files are in my Downloads folder?",
         "list_folder",
@@ -66,7 +73,8 @@ CASES = [
     Case(
         "Please write down a note called Shopping: milk, eggs and bread.",
         "save_note",
-        lambda a: "shop" in _text(a, "title") and "milk" in _text(a, "text"),
+        # Putting everything in the title is a fair reading too.
+        lambda a: "shop" in _text(a, "title") and "milk" in _text(a, "title") + _text(a, "text"),
     ),
     Case("Hi! How are you today?", None),
     Case("What is the capital of France?", None),
@@ -180,6 +188,10 @@ def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
                     called is not None
                     and called.name == case.expect_tool
                     and case.check_args(called.arguments)
+                ) or (
+                    called is None
+                    and case.ok_without_tool is not None
+                    and case.ok_without_tool(r.content)
                 )
                 got = f"{called.name}({called.arguments})" if called else f"no tool: {r.content[:60]!r}"
             if passed:

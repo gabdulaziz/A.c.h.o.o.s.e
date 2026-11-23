@@ -45,9 +45,9 @@ sudo apt install -y git python3
 git clone https://github.com/gabdulaziz/a.c.h.o.o.s.e.git ~/achoose
 cd ~/achoose
 
-# 3. Download the candidate models (about 7.5 GB in total)
+# 3. Download the candidate models (about 8 GB in total)
+ollama pull qwen3:4b
 ollama pull qwen3.5:4b
-ollama pull phi4-mini
 ollama pull llama3.2:3b
 
 # 4. Compare them (takes about 10-20 minutes)
