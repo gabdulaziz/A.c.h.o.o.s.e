@@ -31,12 +31,15 @@ achoose/
   voice/        voice mode: wake word, speech-to-text, Piper voice
     text.py       sentence splitting, cleaning text for speech, hearing "yes"
     engine.py     microphone, ears (faster-whisper), mouth (Piper), wake word
-    loop.py       "Hey Jarvis" -> listen -> think -> speak
+    loop.py       wake word -> listen -> think -> speak
+    check.py      --voice-check: tests each part of voice mode
   agent.py      the thinking loop and the confirmation gate
   config.py     settings (see config.example.toml)
   cli.py        the text chat in your terminal
 scripts/
   benchmark.py  compares models on your computer
+training/
+  train_wake_word.ipynb  trains "Hey Achoose" on Google Colab
 tests/          checks that run without Ollama
 ```
 
@@ -117,6 +120,19 @@ speech understanding and the wake word one by one, and says which part fails and
 ```bash
 .venv/bin/python -m achoose --voice-check
 ```
+
+## Your own wake word ("Hey Achoose")
+
+Achoose can wake up on its own name. The model is trained once on Google Colab (free, about 1 to 1.5 hours,
+no recording of your voice needed) with the notebook [`training/train_wake_word.ipynb`](training/train_wake_word.ipynb).
+It explains every step. At the end you download `hey_achoose.onnx` and put it here:
+
+```bash
+mkdir -p ~/Achoose/wake_words && mv ~/Downloads/hey_achoose.onnx ~/Achoose/wake_words/
+```
+
+Every `.onnx` file in `~/Achoose/wake_words/` is used automatically, and "Hey Jarvis" keeps working as a backup.
+Run `--voice-check` to see the scores for each wake word.
 
 ## Chat commands
 

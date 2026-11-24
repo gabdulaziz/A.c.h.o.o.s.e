@@ -2,7 +2,8 @@
 
   Mouth:     Piper (a British male voice by default)
   Ears:      faster-whisper (speech to text)
-  Wake word: openWakeWord's ready-made "hey jarvis" model
+  Wake word: openWakeWord: ready-made "hey jarvis", plus any trained files
+             in ~/Achoose/wake_words/ (like "hey achoose")
 
 The heavy packages are imported only when voice mode starts, so text mode
 keeps working without them.
@@ -11,6 +12,7 @@ keeps working without them.
 from __future__ import annotations
 
 import queue
+import re
 import threading
 from pathlib import Path
 from typing import Callable
@@ -202,17 +204,58 @@ class Mouth:
 # ---- wake word ----------------------------------------------------------
 
 
+def wake_word_label(name: str) -> str:
+    """'hey_jarvis_v0.1' or '/x/hey_achoose.onnx' -> 'Hey Jarvis' / 'Hey Achoose'."""
+    stem = Path(name).name
+    stem = re.sub(r"\.(onnx|tflite)$", "", stem)
+    stem = re.sub(r"_v\d+(\.\d+)*$", "", stem)
+    return stem.replace("_", " ").strip().title()
+
+
+def find_wake_words(config) -> list[str]:
+    """Trained wake word files in <data_dir>/wake_words first, then the settings' wake_word(s)."""
+    folder = Path(config.data_dir) / "wake_words"
+    found = sorted(str(p) for p in folder.glob("*.onnx")) if folder.is_dir() else []
+    extra = config.wake_word if isinstance(config.wake_word, list) else [config.wake_word]
+    for name in extra:
+        name = str(Path(name).expanduser()) if name.endswith(".onnx") else name
+        if name and name not in found:
+            found.append(name)
+    return found
+
+
 class WakeWord:
-    def __init__(self, name: str = "hey_jarvis", threshold: float = 0.5) -> None:
+    def __init__(self, names: str | list[str] = "hey_jarvis", threshold: float = 0.5) -> None:
+        """names: built-in wake words (like "hey_jarvis") and/or paths to trained .onnx files."""
         try:
             from openwakeword.model import Model
             from openwakeword.utils import download_models
         except ImportError:
             raise VoiceSetupError("openwakeword is missing. See README, 'Voice setup'.") from None
-        download_models([name])  # a few MB, only the first time
-        self.model = Model(wakeword_models=[name], inference_framework="onnx")
-        self.name = name
+        names = [names] if isinstance(names, str) else list(names)
+        files = [n for n in names if n.endswith(".onnx")]
+        missing = [f for f in files if not Path(f).is_file()]
+        if missing:
+            raise VoiceSetupError(f"Wake word file not found: {missing[0]}")
+        built_in = [n for n in names if not n.endswith(".onnx")]
+        # A few MB, only the first time. Also fetches the shared sound-feature models.
+        # (An empty list would download every model, so name at least one.)
+        download_models(built_in or ["hey_jarvis"])
+        self.model = Model(wakeword_models=names, inference_framework="onnx")
+        self.labels = {key: wake_word_label(key) for key in self.model.models}
+        self.names = names
         self.threshold = threshold
+        self.heard = ""  # label of the wake word heard last
+
+    @property
+    def phrase(self) -> str:
+        """For messages: “Hey Achoose” or “Hey Jarvis”."""
+        return " or ".join(f"“{label}”" for label in self.labels.values())
+
+    @property
+    def spoken(self) -> str:
+        """The main wake word, as said in the greeting."""
+        return next(iter(self.labels.values()), "hey Jarvis")
 
     def wait(
         self,
@@ -230,8 +273,11 @@ class WakeWord:
         for block in frames:
             if should_stop():
                 return False
-            score = float(max(self.model.predict(block).values()))
+            scores = self.model.predict(block)
+            key = max(scores, key=scores.get)
+            score = float(scores[key])
             if score >= self.threshold:
+                self.heard = self.labels.get(key, key)
                 return True
             if score >= 0.15:
                 best_miss = max(best_miss, score)

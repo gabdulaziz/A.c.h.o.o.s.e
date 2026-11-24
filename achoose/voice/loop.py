@@ -1,4 +1,4 @@
-"""Voice mode: "Hey Jarvis" -> listen -> think -> speak, again and again."""
+"""Voice mode: wake word ("Hey Achoose" / "Hey Jarvis") -> listen -> think -> speak, again and again."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def run_voice(
     agent.voice = True  # answers are spoken: the brain keeps them short
 
     if wake:
-        mouth.say(f"Online and ready{sir}. Say hey Jarvis when you need me.")
+        mouth.say(f"Online and ready{sir}. Say {wake.spoken} when you need me.")
     else:
         mouth.say(f"Online and ready{sir}. Press Enter, then speak.")
     mouth.wait()
@@ -62,14 +62,14 @@ def run_voice(
     while True:
         try:
             if wake:
-                print("\n(Listening for “Hey Jarvis”... Ctrl+C to stop)")
+                print(f"\n(Listening for {wake.phrase}... Ctrl+C to stop)")
                 time.sleep(0.3)  # let the speaker go quiet so we don't hear ourselves
                 frames = mic.frames()
                 try:
                     wake.wait(
                         frames,
                         on_near_miss=lambda s: print(
-                            f"  (heard something close to “Hey Jarvis”: {s:.2f}, needs {wake.threshold})",
+                            f"  (heard something close to a wake word: {s:.2f}, needs {wake.threshold})",
                             flush=True,
                         ),
                     )
