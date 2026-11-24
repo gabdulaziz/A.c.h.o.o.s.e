@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from typing import Any
 
 from .agent import Agent
 from .brain import BrainError, OllamaBrain, make_brain
+from pathlib import Path
+
 from .config import CONFIG_PATH, load_config
 from .memory import open_memory
 from .tools import Risk, Tool, ToolRegistry, builtin_tools
@@ -71,7 +74,13 @@ def show_tool_step(name: str, arguments: dict[str, Any], result: str) -> None:
     print(f"  · {name}({args}) → {first_line}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="achoose", description="Your private assistant.")
+    parser.add_argument("--voice", action="store_true", help='talk instead of type (say "Hey Jarvis")')
+    parser.add_argument(
+        "--push-to-talk", action="store_true", help="voice mode without a wake word: press Enter, then speak"
+    )
+    args = parser.parse_args(argv)
     config = load_config()
     brain = make_brain(config, "local")
 
@@ -101,7 +110,12 @@ def main() -> int:
         history_messages=config.history_messages,
         max_tool_rounds=config.max_tool_rounds,
         memory_folders=", ".join(_short(p) for p in memory.folders) if memory else "",
+        call_user=config.call_user,
     )
+
+    if args.voice or args.push_to_talk:
+        print(memory_status(memory, why_not))
+        return start_voice(agent, config, push_to_talk=args.push_to_talk)
 
     print(f"Achoose is ready (brain: {brain.name}). Type /help for commands.")
     print(memory_status(memory, why_not))
@@ -159,6 +173,23 @@ def main() -> int:
         if not stream.end_line():  # nothing was shown live, so show it now
             print(f"Achoose: {answer or '(no answer)'}")
         print(f"  ({time.perf_counter() - started:.1f} s)")
+
+
+def start_voice(agent: Agent, config, push_to_talk: bool) -> int:
+    from .voice.engine import Ears, Microphone, Mouth, VoiceSetupError, WakeWord
+    from .voice.loop import run_voice
+
+    print("Starting voice mode (the first start downloads the speech models)...")
+    try:
+        mic = Microphone()
+        mouth = Mouth(Path(config.data_dir) / "voices" / f"{config.voice_name}.onnx", config.voice_speed)
+        ears = Ears(config.stt_model)
+        wake = None if push_to_talk else WakeWord(config.wake_word, config.wake_threshold)
+    except VoiceSetupError as err:
+        print(f"[voice setup] {err}")
+        return 1
+    run_voice(agent, mic, ears, mouth, wake, stream.text, stream.end_line, config.call_user)
+    return 0
 
 
 def memory_status(memory, why_not: str) -> str:

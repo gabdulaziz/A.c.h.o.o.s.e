@@ -41,9 +41,17 @@ NO_ACCESS = re.compile(
 )
 
 
-def build_system_prompt(memory_folders: str = "") -> str:
-    memory = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
-    return SYSTEM_PROMPT.format(memory=memory, today=datetime.now().strftime("%A %d %B %Y"))
+VOICE_PROMPT = """
+Your answers are SPOKEN aloud: use at most 3 short sentences, no lists, no markdown, no file paths."""
+
+
+def build_system_prompt(memory_folders: str = "", call_user: str = "", voice: bool = False) -> str:
+    extra = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
+    if call_user:
+        extra += f"\nYou have the calm, polite, dryly witty manner of a British butler. Address the user as '{call_user}' now and then."
+    if voice:
+        extra += VOICE_PROMPT
+    return SYSTEM_PROMPT.format(memory=extra, today=datetime.now().strftime("%A %d %B %Y"))
 
 
 def deny_all(tool: Tool, arguments: dict[str, Any]) -> bool:
@@ -61,6 +69,7 @@ class Agent:
         history_messages: int = 20,
         max_tool_rounds: int = 5,
         memory_folders: str = "",
+        call_user: str = "",
     ) -> None:
         """memory_folders: e.g. "~/Documents, ~/Downloads" when search_my_files is available."""
         self.brain = brain
@@ -70,6 +79,8 @@ class Agent:
         self.history_messages = history_messages
         self.max_tool_rounds = max_tool_rounds
         self.memory_folders = memory_folders
+        self.call_user = call_user
+        self.voice = False  # set True in voice mode: answers are spoken
         self.history: list[Message] = []
         self.last_stats: list[BrainStats] = []
 
@@ -145,7 +156,8 @@ class Agent:
         return result, ok
 
     def _messages(self) -> list[Message]:
-        return [Message("system", build_system_prompt(self.memory_folders)), *self.history]
+        system = build_system_prompt(self.memory_folders, self.call_user, self.voice)
+        return [Message("system", system), *self.history]
 
     def _trim_history(self) -> None:
         """Keep the last N messages, always starting at a user message."""
