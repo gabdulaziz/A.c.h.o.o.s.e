@@ -23,7 +23,8 @@ Use a tool when the request needs facts from this computer or the user's own fil
 For greetings, general knowledge, advice or writing text, answer directly with no tool.
 Never announce a tool ("Let me check..."); just call it.
 Keep answers to a few sentences unless the user asks for more. Never repeat lists or file contents the user can already see.
-Never invent file contents or results. If a tool fails or the user declines, say so.{memory}
+Never invent file contents or results. If a tool fails or the user declines, say so.
+You do not know the current time: for any question about the time, call get_current_time.{memory}
 Today is {today}."""
 
 MEMORY_PROMPT = """
@@ -41,9 +42,63 @@ NO_ACCESS = re.compile(
 )
 
 
-def build_system_prompt(memory_folders: str = "") -> str:
-    memory = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
-    return SYSTEM_PROMPT.format(memory=memory, today=datetime.now().strftime("%A %d %B %Y"))
+VOICE_PROMPT = """
+Your answers are SPOKEN aloud: use at most 3 short sentences, no lists, no markdown, no file paths."""
+
+
+# Questions about the current time/date. Small models guess the time, or misread
+# 22:45 when turning it into words, so a plain "what time is it" is answered
+# straight from the clock (CLOCK_QUESTION), and any other question that mentions
+# the time gets the clock reading handed to the brain first (TIME_QUESTION).
+CLOCK_QUESTION = re.compile(
+    r"^\W*(?:(?:hey|hi|ok|okay|so|and|jarvis|achoose|please|tell me|can you tell me|do you know)\W+)*"
+    r"(?:what(?:'s| is)? the (?P<t1>time|date)(?: (?:now|right now|today))?"
+    r"|what (?P<t2>time) (?:is it|it is)(?: now| right now)?"
+    r"|(?:the )?(?P<t4>time|date)(?: now| right now| please)?"
+    r"|what (?P<d1>day|date) is (?:it|today)(?: today)?"
+    r"|what(?:'s| is) today'?s (?P<d2>date)"
+    r"|(?:the )?current (?P<t3>time|date))"
+    r"\W*(?:please|sir)?\W*$",
+    re.IGNORECASE,
+)
+TIME_QUESTION = re.compile(
+    r"\bwhat(?:'s| is)? the (?:time|date)\b|\bwhat time\b|\btime is it\b|\bcurrent (?:time|date)\b"
+    r"|\bwhat day is (?:it|today)\b|\bwhat(?:'s| is) today'?s date\b",
+    re.IGNORECASE,
+)
+
+
+def build_system_prompt(memory_folders: str = "", call_user: str = "", voice: bool = False) -> str:
+    extra = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
+    if call_user:
+        extra += f"\nYou have the calm, polite, formal manner of a British butler. Address the user as '{call_user}' now and then. Never invent facts, times, places or offers: say only what you know or what a tool returned."
+    if voice:
+        extra += VOICE_PROMPT
+    return SYSTEM_PROMPT.format(memory=extra, today=datetime.now().strftime("%A %d %B %Y"))
+
+
+def clock_answer(now: datetime, asks_time: bool, call_user: str = "") -> str:
+    """A spoken-style answer made from the clock, e.g. "It's 10:45 in the evening, sir. Today is Tuesday, 24 November."."""
+    sir = f", {call_user}" if call_user else ""
+    day = f"{now:%A}, {now.day} {now:%B}"
+    if not asks_time:
+        return f"Today is {day} {now.year}{sir}."
+    hour12 = now.hour % 12 or 12
+    if 5 <= now.hour < 12:
+        part = "in the morning"
+    elif 12 <= now.hour < 17:
+        part = "in the afternoon"
+    elif 17 <= now.hour < 21:
+        part = "in the evening"
+    else:
+        part = "at night"
+    if now.hour == 12 and now.minute == 0:
+        when = "exactly noon"
+    elif now.hour == 0 and now.minute == 0:
+        when = "exactly midnight"
+    else:
+        when = f"{hour12}:{now.minute:02d} {part}"
+    return f"It's {when}{sir}. Today is {day}."
 
 
 def deny_all(tool: Tool, arguments: dict[str, Any]) -> bool:
@@ -61,6 +116,7 @@ class Agent:
         history_messages: int = 20,
         max_tool_rounds: int = 5,
         memory_folders: str = "",
+        call_user: str = "",
     ) -> None:
         """memory_folders: e.g. "~/Documents, ~/Downloads" when search_my_files is available."""
         self.brain = brain
@@ -70,6 +126,8 @@ class Agent:
         self.history_messages = history_messages
         self.max_tool_rounds = max_tool_rounds
         self.memory_folders = memory_folders
+        self.call_user = call_user
+        self.voice = False  # set True in voice mode: answers are spoken
         self.history: list[Message] = []
         self.last_stats: list[BrainStats] = []
 
@@ -81,6 +139,19 @@ class Agent:
         self.history.append(Message("user", text))
         self._trim_history()
         self.last_stats = []
+        clock = CLOCK_QUESTION.search(text.strip())
+        if clock:
+            asks_time = any(clock.group(g) and clock.group(g).lower() == "time" for g in ("t1", "t2", "t3", "t4"))
+            answer = clock_answer(datetime.now(), asks_time, self.call_user)
+            if on_text:
+                on_text(answer)
+            self.history.append(Message("assistant", answer))
+            return answer
+        if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
+            call = ToolCall("get_current_time", {})
+            self.history.append(Message("assistant", "", tool_calls=[call]))
+            result, _ = self._run_tool(call)
+            self.history.append(Message("tool", result, tool_name=call.name))
 
         safety_net = bool(self.memory_folders) and self.tools.get("search_my_files") is not None
         for round_no in range(self.max_tool_rounds + 1):
@@ -145,7 +216,8 @@ class Agent:
         return result, ok
 
     def _messages(self) -> list[Message]:
-        return [Message("system", build_system_prompt(self.memory_folders)), *self.history]
+        system = build_system_prompt(self.memory_folders, self.call_user, self.voice)
+        return [Message("system", system), *self.history]
 
     def _trim_history(self) -> None:
         """Keep the last N messages, always starting at a user message."""

@@ -28,6 +28,10 @@ achoose/
     store.py      SQLite file with a word index + meaning fingerprints
     embed.py      fingerprints from a small Ollama model (embeddinggemma)
     indexer.py    reads new/changed files, forgets deleted ones
+  voice/        voice mode: wake word, speech-to-text, Piper voice
+    text.py       sentence splitting, cleaning text for speech, hearing "yes"
+    engine.py     microphone, ears (faster-whisper), mouth (Piper), wake word
+    loop.py       "Hey Jarvis" -> listen -> think -> speak
   agent.py      the thinking loop and the confirmation gate
   config.py     settings (see config.example.toml)
   cli.py        the text chat in your terminal
@@ -87,6 +91,32 @@ ollama pull embeddinggemma                # small model for "meaning fingerprint
 
 From then on start Achoose with `.venv/bin/python -m achoose` (from `~/achoose`).
 To index other folders, set `memory_folders` in `~/.config/achoose/config.toml`.
+
+## Voice setup (talk to Achoose)
+
+Achoose can listen for **"Hey Jarvis"**, understand what you say and answer out loud in a calm
+British voice. Everything runs on your computer; nothing is recorded or sent anywhere.
+
+```bash
+cd ~/achoose
+sudo apt install -y libportaudio2                       # lets Python use the microphone and speakers
+.venv/bin/pip install -r requirements-voice.txt         # speech-to-text, voice, wake word engine
+.venv/bin/pip install --no-deps openwakeword==0.6.0     # wake word ("Hey Jarvis")
+.venv/bin/python -m piper.download_voices en_GB-alan-medium --data-dir ~/Achoose/voices
+.venv/bin/python -m achoose --voice                     # or --push-to-talk (press Enter, then speak)
+```
+
+The first start also downloads the speech-to-text model (about 145 MB) and the wake word files.
+Say **"goodbye"** to leave voice mode. Before saving or changing anything, Achoose asks out loud;
+only a clear "yes" counts. Voice, speed, wake word and "sir" can be changed in the settings file.
+
+If voice mode does not react, run the voice check. It tests the speaker, the microphone level,
+speech understanding and the wake word one by one, and says which part fails and what to change
+(for example `input_device` to pick another microphone, or a lower `wake_threshold`):
+
+```bash
+.venv/bin/python -m achoose --voice-check
+```
 
 ## Chat commands
 
