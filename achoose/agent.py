@@ -21,6 +21,7 @@ ToolEventFn = Callable[[str, dict[str, Any], str], None]
 SYSTEM_PROMPT = """You are Achoose, a private assistant on the user's own computer. Be warm and brief. Reply in the user's language.
 Use a tool when the request needs facts from this computer or the user's own files (the time, a folder, a file, their documents), or the user clearly asks to save a note.
 For greetings, general knowledge, advice or writing text, answer directly with no tool.
+Never announce a tool ("Let me check..."); just call it.
 Keep answers to a few sentences unless the user asks for more. Never repeat lists or file contents the user can already see.
 Never invent file contents or results. If a tool fails or the user declines, say so.{memory}
 Today is {today}."""
@@ -28,7 +29,8 @@ Today is {today}."""
 MEMORY_PROMPT = """
 You CAN search the user's own documents and notes ({folders}) with search_my_files.
 For any question about the user's own files, notes, school work, projects or past work, call search_my_files first.
-Answer from what it finds and name the file. Never say you cannot access the user's files."""
+Answer from what it finds in 2 to 3 plain sentences (no headings or lists) and name the file. Give details only if the user asks.
+Never say you cannot access the user's files."""
 
 # Small models sometimes forget they can search. This spots that kind of answer.
 NO_ACCESS = re.compile(

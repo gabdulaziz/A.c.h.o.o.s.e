@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .base import Tool, ToolError
 
-SNIPPET_CHARS = 600  # per result; the brain must read these before answering
+SNIPPET_CHARS = 400  # per result; the brain must read these before answering
 
 
 def memory_tools(memory) -> list[Tool]:
