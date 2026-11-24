@@ -59,6 +59,7 @@ class Config:
     wake_word: str = "hey_jarvis"
     wake_threshold: float = 0.5  # higher = fewer false wake-ups, but may miss you
     call_user: str = "sir"  # how Achoose addresses you; "" for nothing
+    input_device: str = ""  # microphone number or name part; "" = system default (see --voice-check)
 
     # How many past messages to keep in the conversation (keeps it fast)
     history_messages: int = 20

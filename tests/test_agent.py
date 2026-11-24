@@ -227,6 +227,18 @@ class AgentTests(unittest.TestCase):
         agent.ask("capital of France?", on_text=shown.append)
         self.assertEqual("".join(shown).strip(), "Paris is the capital of France.")
 
+    def test_time_questions_look_at_the_clock_first(self):
+        import time
+
+        agent, brain = self.agent([BrainReply("It is ten past ten, sir.")])
+        agent.ask("Hey, what time is it?")
+        tool_msgs = [m for m in brain.seen[0] if m.role == "tool"]
+        self.assertEqual(len(tool_msgs), 1)  # clock read before the brain answered
+        self.assertIn(time.strftime("%Y"), tool_msgs[0].content)
+        agent2, brain2 = self.agent([BrainReply("Hello!")])
+        agent2.ask("tell me a joke")
+        self.assertFalse([m for m in brain2.seen[0] if m.role == "tool"])
+
     def test_only_save_note_needs_confirmation(self):
         risky = [t.name for t in self.tools if t.risk is not Risk.READ]
         self.assertEqual(risky, ["save_note"])

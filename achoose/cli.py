@@ -80,8 +80,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--push-to-talk", action="store_true", help="voice mode without a wake word: press Enter, then speak"
     )
+    parser.add_argument(
+        "--voice-check", action="store_true", help="test microphone, speaker, speech and wake word one by one"
+    )
     args = parser.parse_args(argv)
     config = load_config()
+    if args.voice_check:
+        from .voice.check import run_check
+
+        return run_check(config)
     brain = make_brain(config, "local")
 
     if isinstance(brain, OllamaBrain):
@@ -181,7 +188,8 @@ def start_voice(agent: Agent, config, push_to_talk: bool) -> int:
 
     print("Starting voice mode (the first start downloads the speech models)...")
     try:
-        mic = Microphone()
+        mic = Microphone(config.input_device)
+        print(f"Microphone: {mic.describe()}")
         mouth = Mouth(Path(config.data_dir) / "voices" / f"{config.voice_name}.onnx", config.voice_speed)
         ears = Ears(config.stt_model)
         wake = None if push_to_talk else WakeWord(config.wake_word, config.wake_threshold)

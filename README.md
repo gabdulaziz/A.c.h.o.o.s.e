@@ -110,6 +110,14 @@ The first start also downloads the speech-to-text model (about 145 MB) and the w
 Say **"goodbye"** to leave voice mode. Before saving or changing anything, Achoose asks out loud;
 only a clear "yes" counts. Voice, speed, wake word and "sir" can be changed in the settings file.
 
+If voice mode does not react, run the voice check. It tests the speaker, the microphone level,
+speech understanding and the wake word one by one, and says which part fails and what to change
+(for example `input_device` to pick another microphone, or a lower `wake_threshold`):
+
+```bash
+.venv/bin/python -m achoose --voice-check
+```
+
 ## Chat commands
 
 `/help`, `/tools`, `/stats` (speed of the last answer), `/reset` (forget the chat),

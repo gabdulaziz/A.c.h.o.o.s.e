@@ -23,7 +23,8 @@ Use a tool when the request needs facts from this computer or the user's own fil
 For greetings, general knowledge, advice or writing text, answer directly with no tool.
 Never announce a tool ("Let me check..."); just call it.
 Keep answers to a few sentences unless the user asks for more. Never repeat lists or file contents the user can already see.
-Never invent file contents or results. If a tool fails or the user declines, say so.{memory}
+Never invent file contents or results. If a tool fails or the user declines, say so.
+You do not know the current time: for any question about the time, call get_current_time.{memory}
 Today is {today}."""
 
 MEMORY_PROMPT = """
@@ -43,6 +44,15 @@ NO_ACCESS = re.compile(
 
 VOICE_PROMPT = """
 Your answers are SPOKEN aloud: use at most 3 short sentences, no lists, no markdown, no file paths."""
+
+
+# Questions about the current time/date. Small models tend to guess the time
+# instead of checking, so Achoose looks it up first and hands it to the brain.
+TIME_QUESTION = re.compile(
+    r"\bwhat(?:'s| is)? the (?:time|date)\b|\bwhat time\b|\btime is it\b|\bcurrent (?:time|date)\b"
+    r"|\bwhat day is (?:it|today)\b|\bwhat(?:'s| is) today'?s date\b",
+    re.IGNORECASE,
+)
 
 
 def build_system_prompt(memory_folders: str = "", call_user: str = "", voice: bool = False) -> str:
@@ -92,6 +102,11 @@ class Agent:
         self.history.append(Message("user", text))
         self._trim_history()
         self.last_stats = []
+        if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
+            call = ToolCall("get_current_time", {})
+            self.history.append(Message("assistant", "", tool_calls=[call]))
+            result, _ = self._run_tool(call)
+            self.history.append(Message("tool", result, tool_name=call.name))
 
         safety_net = bool(self.memory_folders) and self.tools.get("search_my_files") is not None
         for round_no in range(self.max_tool_rounds + 1):

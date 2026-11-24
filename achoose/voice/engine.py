@@ -31,7 +31,7 @@ class VoiceSetupError(RuntimeError):
 
 
 class Microphone:
-    def __init__(self) -> None:
+    def __init__(self, device: int | str | None = None) -> None:
         try:
             import sounddevice as sd
         except OSError:
@@ -41,6 +41,11 @@ class Microphone:
         except ImportError:
             raise VoiceSetupError("Voice packages missing. See README, 'Voice setup'.") from None
         self.sd = sd
+        self.device = device if device not in ("", None) else None
+
+    def describe(self) -> str:
+        info = self.sd.query_devices(self.device, "input")
+        return f"#{info['index']} {info['name']}"
 
     def frames(self):
         """Yield 80 ms blocks of 16-bit audio until the caller stops."""
@@ -50,7 +55,12 @@ class Microphone:
             q.put(indata[:, 0].copy())
 
         with self.sd.InputStream(
-            samplerate=RATE, channels=1, dtype="int16", blocksize=FRAME, callback=callback
+            samplerate=RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=FRAME,
+            callback=callback,
+            device=self.device,
         ):
             while True:
                 yield q.get()
@@ -204,13 +214,31 @@ class WakeWord:
         self.name = name
         self.threshold = threshold
 
-    def wait(self, frames, should_stop: Callable[[], bool] = lambda: False) -> bool:
-        """Listen until the wake word is heard. Very light on the processor."""
+    def wait(
+        self,
+        frames,
+        should_stop: Callable[[], bool] = lambda: False,
+        on_near_miss: Callable[[float], None] | None = None,
+    ) -> bool:
+        """Listen until the wake word is heard. Very light on the processor.
+
+        on_near_miss is told about scores that came close (useful to tune the
+        threshold or spot a quiet microphone)."""
         self.model.reset()
+        best_miss = 0.0
+        quiet_blocks = 0
         for block in frames:
             if should_stop():
                 return False
-            scores = self.model.predict(block)
-            if max(scores.values()) >= self.threshold:
+            score = float(max(self.model.predict(block).values()))
+            if score >= self.threshold:
                 return True
+            if score >= 0.15:
+                best_miss = max(best_miss, score)
+                quiet_blocks = 0
+            elif best_miss:
+                quiet_blocks += 1
+                if quiet_blocks > 10 and on_near_miss:  # the attempt is over: report it once
+                    on_near_miss(best_miss)
+                    best_miss, quiet_blocks = 0.0, 0
         return False

@@ -123,7 +123,7 @@ class VoiceLoopTests(unittest.TestCase):
                 pass
 
         class Wake:
-            def wait(self_, frames, should_stop=lambda: False):
+            def wait(self_, frames, should_stop=lambda: False, on_near_miss=None):
                 return True
 
         mouth = Mouth()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from ..agent import Agent
@@ -62,9 +63,16 @@ def run_voice(
         try:
             if wake:
                 print("\n(Listening for “Hey Jarvis”... Ctrl+C to stop)")
+                time.sleep(0.3)  # let the speaker go quiet so we don't hear ourselves
                 frames = mic.frames()
                 try:
-                    wake.wait(frames)
+                    wake.wait(
+                        frames,
+                        on_near_miss=lambda s: print(
+                            f"  (heard something close to “Hey Jarvis”: {s:.2f}, needs {wake.threshold})",
+                            flush=True,
+                        ),
+                    )
                 finally:
                     frames.close()
             else:
