@@ -38,7 +38,8 @@ def builtin_tools(config: Config) -> list[Tool]:
 
     def get_current_time() -> str:
         now = datetime.now().astimezone()
-        return now.strftime("%A %d %B %Y, %H:%M (%Z)")
+        hour12 = now.hour % 12 or 12
+        return now.strftime(f"%A %d %B %Y, %H:%M ({hour12}:%M %p), time zone %Z")
 
     def list_folder(path: str = "~", only: str = "") -> str:
         folder = safe_path(path)

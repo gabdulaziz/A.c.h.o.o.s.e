@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -227,14 +228,32 @@ class AgentTests(unittest.TestCase):
         agent.ask("capital of France?", on_text=shown.append)
         self.assertEqual("".join(shown).strip(), "Paris is the capital of France.")
 
-    def test_time_questions_look_at_the_clock_first(self):
-        import time
+    def test_plain_time_questions_are_answered_from_the_clock(self):
+        for q in ["What time is it now?", "Hey, what time is it?", "what's the time, sir", "What is the date today?"]:
+            agent, brain = self.agent([])
+            shown = []
+            answer = agent.ask(q, on_text=shown.append)
+            self.assertEqual(brain.seen, [], q)  # the brain is not asked at all
+            self.assertEqual("".join(shown), answer)
+            self.assertIn(time.strftime("%A"), answer, q)
 
-        agent, brain = self.agent([BrainReply("It is ten past ten, sir.")])
-        agent.ask("Hey, what time is it?")
+    def test_clock_answer_wording(self):
+        from datetime import datetime
+
+        from achoose.agent import clock_answer
+
+        now = datetime(2026, 11, 24, 22, 45)
+        self.assertEqual(clock_answer(now, True, "sir"), "It's 10:45 at night, sir. Today is Tuesday, 24 November.")
+        self.assertEqual(clock_answer(datetime(2026, 11, 24, 9, 5), True), "It's 9:05 in the morning. Today is Tuesday, 24 November.")
+        self.assertEqual(clock_answer(now, False, "sir"), "Today is Tuesday, 24 November 2026, sir.")
+
+    def test_other_time_questions_give_the_brain_the_clock(self):
+        agent, brain = self.agent([BrainReply("Most shops close at nine.")])
+        agent.ask("What time do shops usually close?")
         tool_msgs = [m for m in brain.seen[0] if m.role == "tool"]
         self.assertEqual(len(tool_msgs), 1)  # clock read before the brain answered
         self.assertIn(time.strftime("%Y"), tool_msgs[0].content)
+        self.assertIn("PM" if time.localtime().tm_hour >= 12 else "AM", tool_msgs[0].content)
         agent2, brain2 = self.agent([BrainReply("Hello!")])
         agent2.ask("tell me a joke")
         self.assertFalse([m for m in brain2.seen[0] if m.role == "tool"])

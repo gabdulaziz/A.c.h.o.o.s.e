@@ -46,8 +46,21 @@ VOICE_PROMPT = """
 Your answers are SPOKEN aloud: use at most 3 short sentences, no lists, no markdown, no file paths."""
 
 
-# Questions about the current time/date. Small models tend to guess the time
-# instead of checking, so Achoose looks it up first and hands it to the brain.
+# Questions about the current time/date. Small models guess the time, or misread
+# 22:45 when turning it into words, so a plain "what time is it" is answered
+# straight from the clock (CLOCK_QUESTION), and any other question that mentions
+# the time gets the clock reading handed to the brain first (TIME_QUESTION).
+CLOCK_QUESTION = re.compile(
+    r"^\W*(?:(?:hey|hi|ok|okay|so|and|jarvis|achoose|please|tell me|can you tell me|do you know)\W+)*"
+    r"(?:what(?:'s| is)? the (?P<t1>time|date)(?: (?:now|right now|today))?"
+    r"|what (?P<t2>time) (?:is it|it is)(?: now| right now)?"
+    r"|(?:the )?(?P<t4>time|date)(?: now| right now| please)?"
+    r"|what (?P<d1>day|date) is (?:it|today)(?: today)?"
+    r"|what(?:'s| is) today'?s (?P<d2>date)"
+    r"|(?:the )?current (?P<t3>time|date))"
+    r"\W*(?:please|sir)?\W*$",
+    re.IGNORECASE,
+)
 TIME_QUESTION = re.compile(
     r"\bwhat(?:'s| is)? the (?:time|date)\b|\bwhat time\b|\btime is it\b|\bcurrent (?:time|date)\b"
     r"|\bwhat day is (?:it|today)\b|\bwhat(?:'s| is) today'?s date\b",
@@ -58,10 +71,34 @@ TIME_QUESTION = re.compile(
 def build_system_prompt(memory_folders: str = "", call_user: str = "", voice: bool = False) -> str:
     extra = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
     if call_user:
-        extra += f"\nYou have the calm, polite, dryly witty manner of a British butler. Address the user as '{call_user}' now and then."
+        extra += f"\nYou have the calm, polite, formal manner of a British butler. Address the user as '{call_user}' now and then. Never invent facts, times, places or offers: say only what you know or what a tool returned."
     if voice:
         extra += VOICE_PROMPT
     return SYSTEM_PROMPT.format(memory=extra, today=datetime.now().strftime("%A %d %B %Y"))
+
+
+def clock_answer(now: datetime, asks_time: bool, call_user: str = "") -> str:
+    """A spoken-style answer made from the clock, e.g. "It's 10:45 in the evening, sir. Today is Tuesday, 24 November."."""
+    sir = f", {call_user}" if call_user else ""
+    day = f"{now:%A}, {now.day} {now:%B}"
+    if not asks_time:
+        return f"Today is {day} {now.year}{sir}."
+    hour12 = now.hour % 12 or 12
+    if 5 <= now.hour < 12:
+        part = "in the morning"
+    elif 12 <= now.hour < 17:
+        part = "in the afternoon"
+    elif 17 <= now.hour < 21:
+        part = "in the evening"
+    else:
+        part = "at night"
+    if now.hour == 12 and now.minute == 0:
+        when = "exactly noon"
+    elif now.hour == 0 and now.minute == 0:
+        when = "exactly midnight"
+    else:
+        when = f"{hour12}:{now.minute:02d} {part}"
+    return f"It's {when}{sir}. Today is {day}."
 
 
 def deny_all(tool: Tool, arguments: dict[str, Any]) -> bool:
@@ -102,6 +139,14 @@ class Agent:
         self.history.append(Message("user", text))
         self._trim_history()
         self.last_stats = []
+        clock = CLOCK_QUESTION.search(text.strip())
+        if clock:
+            asks_time = any(clock.group(g) and clock.group(g).lower() == "time" for g in ("t1", "t2", "t3", "t4"))
+            answer = clock_answer(datetime.now(), asks_time, self.call_user)
+            if on_text:
+                on_text(answer)
+            self.history.append(Message("assistant", answer))
+            return answer
         if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
             call = ToolCall("get_current_time", {})
             self.history.append(Message("assistant", "", tool_calls=[call]))
