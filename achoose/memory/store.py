@@ -97,6 +97,15 @@ class MemoryStore:
         self.db.commit()
         self._matrix = None
 
+    def find_paths(self, words: list[str]) -> list[str]:
+        """Indexed files whose path contains every word (any case)."""
+        sql = "SELECT path FROM files"
+        args: list[str] = []
+        if words:
+            sql += " WHERE " + " AND ".join("LOWER(path) LIKE ?" for _ in words)
+            args = [f"%{w.lower()}%" for w in words]
+        return [r[0] for r in self.db.execute(sql + " ORDER BY path", args)]
+
     # ---- changes ------------------------------------------------------
 
     def put_file(

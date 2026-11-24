@@ -40,7 +40,7 @@ def builtin_tools(config: Config) -> list[Tool]:
         now = datetime.now().astimezone()
         return now.strftime("%A %d %B %Y, %H:%M (%Z)")
 
-    def list_folder(path: str = "~") -> str:
+    def list_folder(path: str = "~", only: str = "") -> str:
         folder = safe_path(path)
         if not folder.exists():
             raise ToolError(f"{folder} does not exist.")
@@ -62,6 +62,18 @@ def builtin_tools(config: Config) -> list[Tool]:
         lines = [
             f"{folder}: {len(entries)} items ({n_dirs} folders, {len(entries) - n_dirs} files)."
         ]
+        kind = (only or "").strip().lower().lstrip(".")
+        if kind in ("folder", "folders", "dir", "dirs", "directories"):
+            entries = [e for e in entries if e[1]]
+            lines.append(f"Folders ({len(entries)}):")
+        elif kind in ("file", "files"):
+            entries = [e for e in entries if not e[1]]
+            lines.append(f"Files ({len(entries)}):")
+        elif kind and kind not in ("all", "everything"):
+            entries = [e for e in entries if not e[1] and e[2].lower().endswith("." + kind)]
+            lines.append(f".{kind} files ({len(entries)}):")
+            if not entries:
+                return "\n".join(lines[:1] + [f"No .{kind} files here."])
         if len(entries) > MAX_LIST_ENTRIES:
             lines.append(f"The {MAX_LIST_ENTRIES} most recently changed:")
         for mtime, is_dir, name, size in entries[:MAX_LIST_ENTRIES]:
@@ -117,7 +129,11 @@ def builtin_tools(config: Config) -> list[Tool]:
                 "path": {
                     "type": "string",
                     "description": "Folder, e.g. ~/Downloads",
-                }
+                },
+                "only": {
+                    "type": "string",
+                    "description": "Optional filter: folders, files, or a file type like pdf",
+                },
             },
             required=["path"],
         ),

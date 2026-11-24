@@ -150,6 +150,20 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(lines), 2 + 25)
         self.assertTrue(lines[2].startswith("file39.txt"))
 
+    def test_folder_list_filters(self):
+        d = self.root / "docs"
+        (d / "sub").mkdir()
+        (d / "a.pdf").write_text("x")
+        tool = self.tools.get("list_folder")
+        out = tool.run(path=str(d), only="folders")
+        self.assertIn("Folders (1)", out)
+        self.assertIn("sub/", out)
+        self.assertNotIn("todo.txt", out)
+        out = tool.run(path=str(d), only="pdf")
+        self.assertIn("a.pdf", out)
+        self.assertNotIn("todo.txt", out)
+        self.assertIn("No .docx", tool.run(path=str(d), only=".docx"))
+
     def test_long_file_is_cut(self):
         long = self.root / "docs" / "long.txt"
         long.write_text("a" * 10_000)

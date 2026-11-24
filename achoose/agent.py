@@ -29,6 +29,7 @@ Today is {today}."""
 MEMORY_PROMPT = """
 You CAN search the user's own documents and notes ({folders}) with search_my_files.
 For any question about the user's own files, notes, school work, projects or past work, call search_my_files first.
+To count or list ALL files of some kind ("how many labs", "all my PDFs about X"), use find_my_files instead.
 Answer from what it finds in 2 to 3 plain sentences (no headings or lists) and name the file. Give details only if the user asks.
 Never say you cannot access the user's files."""
 

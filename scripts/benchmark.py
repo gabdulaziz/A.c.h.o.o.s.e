@@ -82,6 +82,16 @@ CASES = [
         "search_my_files",
         lambda a: "java" in _text(a, "query"),
     ),
+    Case(
+        "How many Java lab files do I have?",
+        "find_my_files",
+        lambda a: "lab" in _text(a, "name"),
+    ),
+    Case(
+        "Which folders are in my Downloads?",
+        "list_folder",
+        lambda a: "download" in _text(a, "path") and "folder" in _text(a, "only"),
+    ),
     Case("Hi! How are you today?", None),
     Case("What is the capital of France?", None),
     Case("Write a short, kind birthday wish for my sister.", None),
