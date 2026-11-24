@@ -24,9 +24,13 @@ class ScriptedBrain:
         self.replies = list(replies)
         self.seen: list[list[Message]] = []
 
-    def chat(self, messages, tools):
+    def chat(self, messages, tools, on_text=None):
         self.seen.append(list(messages))
-        return self.replies.pop(0)
+        reply = self.replies.pop(0)
+        if on_text and reply.content:
+            for word in reply.content.split(" "):
+                on_text(word + " ")
+        return reply
 
 
 def call(name: str, **args) -> BrainReply:
@@ -152,6 +156,62 @@ class AgentTests(unittest.TestCase):
         out = self.tools.get("read_text_file").run(path=str(long))
         self.assertLess(len(out), 3_200)
         self.assertIn("cut off", out)
+
+    def _with_search(self, results):
+        from achoose.tools import Tool
+
+        searched = []
+
+        def search_my_files(query):
+            searched.append(query)
+            return results
+
+        self.tools.add(Tool("search_my_files", "search", search_my_files, parameters={"query": {"type": "string"}}))
+        return searched
+
+    def test_memory_instructions_only_when_memory_exists(self):
+        agent, brain = self.agent([BrainReply("hi")])
+        agent.ask("hi")
+        self.assertNotIn("search_my_files", brain.seen[0][0].content)
+        self._with_search("x")
+        agent, brain = self.agent([BrainReply("hi")])
+        agent.memory_folders = "~/Documents"
+        agent.ask("hi")
+        self.assertIn("Never say you cannot access", brain.seen[0][0].content)
+
+    def test_safety_net_searches_when_brain_claims_no_access(self):
+        searched = self._with_search("[1] ~/Downloads/java.docx\nInheritance and interfaces")
+        agent, brain = self.agent(
+            [BrainReply("I don't have access to your past assignments."), BrainReply("It covered inheritance (java.docx).")]
+        )
+        agent.memory_folders = "~/Documents, ~/Downloads"
+        shown = []
+        answer = agent.ask("what did my java midterm cover?", on_text=shown.append)
+        self.assertEqual(searched, ["what did my java midterm cover?"])
+        self.assertEqual(answer, "It covered inheritance (java.docx).")
+        self.assertNotIn("access", "".join(shown))  # the wrong answer was never shown
+        self.assertFalse(any("don't have access" in m.content for m in agent.history))
+
+    def test_safety_net_off_without_memory(self):
+        agent, brain = self.agent([BrainReply("I can't see your screen.")])
+        self.assertEqual(agent.ask("what's on my screen?"), "I can't see your screen.")
+        self.assertEqual(len(brain.seen), 1)
+
+    def test_normal_answers_still_stream_with_safety_net(self):
+        class Streaming(ScriptedBrain):
+            def chat(self, messages, tools, on_text=None):
+                reply = super().chat(messages, tools)
+                if on_text:
+                    for word in reply.content.split(" "):
+                        on_text(word + " ")
+                return reply
+
+        self._with_search("x")
+        brain = Streaming([BrainReply("Paris is the capital of France.")])
+        agent = Agent(brain, self.tools, memory_folders="~/Documents")
+        shown = []
+        agent.ask("capital of France?", on_text=shown.append)
+        self.assertEqual("".join(shown).strip(), "Paris is the capital of France.")
 
     def test_only_save_note_needs_confirmation(self):
         risky = [t.name for t in self.tools if t.risk is not Risk.READ]

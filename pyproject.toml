@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+memory = ["numpy>=1.26", "pypdf>=4.0", "python-docx>=1.1", "python-pptx>=1.0"]
+
 [project.scripts]
 achoose = "achoose.cli:main"
 

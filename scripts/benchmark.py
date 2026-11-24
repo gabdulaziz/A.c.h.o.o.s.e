@@ -29,10 +29,11 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from achoose.agent import SYSTEM_PROMPT  # noqa: E402
+from achoose.agent import build_system_prompt  # noqa: E402
 from achoose.brain import BrainError, Message, OllamaBrain  # noqa: E402
 from achoose.config import load_config  # noqa: E402
 from achoose.tools import ToolRegistry, builtin_tools  # noqa: E402
+from achoose.tools.memory_tool import memory_tools  # noqa: E402
 
 DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "llama3.2:3b"]
 
@@ -75,6 +76,11 @@ CASES = [
         "save_note",
         # Putting everything in the title is a fair reading too.
         lambda a: "shop" in _text(a, "title") and "milk" in _text(a, "title") + _text(a, "text"),
+    ),
+    Case(
+        "What did my Java midterm cover?",
+        "search_my_files",
+        lambda a: "java" in _text(a, "query"),
     ),
     Case("Hi! How are you today?", None),
     Case("What is the capital of France?", None),
@@ -131,7 +137,7 @@ def _full_name(name: str) -> str:
 def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
     res = Result(model=model, tool_total=len(CASES))
     brain = OllamaBrain(model, host=host, context_tokens=4096, temperature=0.0, think=False)
-    system = Message("system", SYSTEM_PROMPT.format(today=datetime.now().strftime("%A %d %B %Y")))
+    system = Message("system", build_system_prompt("~/Documents, ~/Downloads"))
 
     try:
         # 1. Wake the model up (measures load time). This also lets Ollama
@@ -279,7 +285,8 @@ def main() -> int:
     if not models:
         return 1
 
-    schemas = ToolRegistry(builtin_tools(config)).schemas()
+    # Tools are only described to the model here, never run.
+    schemas = ToolRegistry(builtin_tools(config) + memory_tools(None)).schemas()
     results = []
     for m in models:
         print(f"\n=== {m} ===")
