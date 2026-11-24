@@ -130,6 +130,20 @@ class MemoryTests(unittest.TestCase):
         hits = self.memory.search("satellite power")
         self.assertTrue(hits[0].path.endswith("space.txt"))
 
+    def test_program_installs_and_skip_patterns_are_ignored(self):
+        from achoose.memory.indexer import Memory
+        from achoose.memory.store import MemoryStore
+
+        jdk = self.docs / "OpenJDK25U-jdk"
+        (jdk / "bin").mkdir(parents=True)
+        (jdk / "lib").mkdir()
+        (jdk / "README.txt").write_text("java inheritance readme")
+        old = self.docs / "old-stuff"
+        old.mkdir()
+        (old / "note.txt").write_text("old note")
+        found = Memory(MemoryStore(self.db), self.embedder, [self.docs], skip=["old-*"]).find_files()
+        self.assertEqual(sorted(Path(p).name for p in found), ["java.md", "space.txt"])
+
     def test_only_changes_are_reread(self):
         self.memory.update()
         calls = self.embedder.calls

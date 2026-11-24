@@ -39,7 +39,12 @@ class Config:
     read_folders: list[Path] = field(default_factory=lambda: [Path("~")])
 
     # Memory: folders Achoose indexes so it can search inside your files
-    memory_folders: list[Path] = field(default_factory=lambda: [Path("~/Documents")])
+    memory_folders: list[Path] = field(
+        default_factory=lambda: [Path("~/Documents"), Path("~/Downloads")]
+    )
+    # Folder names to leave out of memory (wildcards allowed, e.g. "old-*").
+    # Program installs (folders with both bin/ and lib/ inside) are skipped anyway.
+    memory_skip: list[str] = field(default_factory=list)
     # Small model that makes the "meaning fingerprints" for search
     embed_model: str = "embeddinggemma"
 

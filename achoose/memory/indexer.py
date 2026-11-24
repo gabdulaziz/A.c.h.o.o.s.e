@@ -6,6 +6,7 @@ is quick. Files that were deleted are removed from the index too.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import time
 from dataclasses import dataclass, field
@@ -38,10 +39,27 @@ class IndexReport:
 
 
 class Memory:
-    def __init__(self, store: MemoryStore, embedder: Embedder, folders: list[Path]) -> None:
+    def __init__(
+        self,
+        store: MemoryStore,
+        embedder: Embedder,
+        folders: list[Path],
+        skip: list[str] | None = None,
+    ) -> None:
         self.store = store
         self.embedder = embedder
         self.folders = folders
+        self.skip = [s.lower() for s in (skip or [])]
+
+    def _skip_dir(self, parent: str, name: str) -> bool:
+        if name.startswith(".") or name in SKIP_DIRS:
+            return True
+        if any(fnmatch.fnmatch(name.lower(), pattern) for pattern in self.skip):
+            return True
+        # A folder with both bin/ and lib/ is almost always an installed program
+        # (a JDK, an SDK...): thousands of files that never answer questions.
+        inside = os.path.join(parent, name)
+        return os.path.isdir(os.path.join(inside, "bin")) and os.path.isdir(os.path.join(inside, "lib"))
 
     # ---- indexing -----------------------------------------------------
 
@@ -51,7 +69,7 @@ class Memory:
             if not root.is_dir():
                 continue
             for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
+                dirnames[:] = [d for d in dirnames if not self._skip_dir(dirpath, d)]
                 for name in filenames:
                     path = Path(dirpath) / name
                     if name.startswith(".") or not is_supported(path):

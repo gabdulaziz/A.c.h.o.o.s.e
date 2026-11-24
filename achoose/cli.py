@@ -99,6 +99,7 @@ def main() -> int:
         on_tool=show_tool_step,
         history_messages=config.history_messages,
         max_tool_rounds=config.max_tool_rounds,
+        memory_folders=", ".join(_short(p) for p in memory.folders) if memory else "",
     )
 
     print(f"Achoose is ready (brain: {brain.name}). Type /help for commands.")

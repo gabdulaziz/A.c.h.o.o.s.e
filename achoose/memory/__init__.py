@@ -21,4 +21,4 @@ def open_memory(config: Config):
         return None, f"memory is off: missing Python package ({err.name}). See README, 'Memory setup'."
     store = MemoryStore(Path(config.data_dir) / "memory.db")
     embedder = OllamaEmbedder(config.embed_model, host=config.ollama_host)
-    return Memory(store, embedder, config.memory_folders), ""
+    return Memory(store, embedder, config.memory_folders, skip=config.memory_skip), ""
