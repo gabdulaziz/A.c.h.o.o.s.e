@@ -82,10 +82,28 @@ class Memory:
                         found[str(path)] = (st.st_mtime, st.st_size)
         return found
 
-    def update(self, progress: ProgressFn | None = None) -> IndexReport:
+    def update(
+        self,
+        progress: ProgressFn | None = None,
+        threads: int | None = None,
+        pause_seconds: float = 0.0,
+    ) -> IndexReport:
+        """Bring the index up to date.
+
+        threads / pause_seconds make it gentler: fewer processor cores and a
+        short rest after each file, so the laptop stays cool (but it is slower).
+        """
         started = time.perf_counter()
         report = IndexReport()
+        if hasattr(self.embedder, "threads"):
+            self.embedder.threads = threads
+        try:
+            return self._update(report, started, progress, pause_seconds)
+        finally:
+            if hasattr(self.embedder, "threads"):
+                self.embedder.threads = None  # searches run at full speed
 
+    def _update(self, report, started, progress, pause_seconds) -> IndexReport:
         # A different fingerprint model means old fingerprints can't be compared.
         if self.store.get_meta("embedder") not in (None, self.embedder.name):
             self.store.clear()
@@ -123,6 +141,8 @@ class Memory:
                 report.updated += 1
             else:
                 report.added += 1
+            if pause_seconds and pieces:
+                time.sleep(pause_seconds)
         if progress and todo:
             progress(len(todo), len(todo), "")
         report.seconds = time.perf_counter() - started

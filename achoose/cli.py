@@ -18,7 +18,8 @@ HELP = """Commands:
   /tools   list what Achoose can do
   /stats   speed of the last answer
   /reset   forget this conversation
-  /index   read new or changed files in your memory folders
+  /index   read new or changed files in your memory folders (gentle, keeps the laptop cool)
+  /index fast   same, at full speed (laptop gets warm)
   /quit    leave (or press Ctrl+D)"""
 
 
@@ -122,9 +123,12 @@ def main() -> int:
                 return 0
             if cmd == "/help":
                 print(HELP)
-            elif cmd == "/index":
+            elif cmd in ("/index", "/index fast"):
                 if memory:
-                    run_index(memory)
+                    if cmd == "/index fast":
+                        run_index(memory)
+                    else:
+                        run_index(memory, config.index_threads, config.index_pause_seconds)
                 else:
                     print(why_not)
             elif cmd == "/reset":
@@ -167,12 +171,16 @@ def memory_status(memory, why_not: str) -> str:
     return f"Memory: {files} files ({pieces} pieces) from {folders}. Type /index to refresh."
 
 
-def run_index(memory) -> None:
+def run_index(memory, threads: int | None = None, pause_seconds: float = 0.0) -> None:
     folders = ", ".join(_short(p) for p in memory.folders)
     missing = [p for p in memory.folders if not p.is_dir()]
     for p in missing:
         print(f"  (folder {_short(p)} does not exist, skipped)")
     print(f"Indexing {folders}. The first time can take a while; later runs only read changes.")
+    if threads:
+        print(f"Gentle mode: {threads} processor threads and short rests. Type /index fast for full speed.")
+    else:
+        print("Full speed: the laptop will get warm. Plain /index is gentler.")
     print("Press Ctrl+C to stop. Finished files are kept, and the next /index continues.")
     started = time.perf_counter()
 
@@ -188,7 +196,7 @@ def run_index(memory) -> None:
         print(f"\r  {done}/{total} files{eta}  {name:<40}", end="", flush=True)
 
     try:
-        report = memory.update(progress)
+        report = memory.update(progress, threads=threads, pause_seconds=pause_seconds)
     except KeyboardInterrupt:
         print("\n  Stopped. Type /index to continue later.")
         return

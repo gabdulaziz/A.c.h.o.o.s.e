@@ -144,6 +144,20 @@ class MemoryTests(unittest.TestCase):
         found = Memory(MemoryStore(self.db), self.embedder, [self.docs], skip=["old-*"]).find_files()
         self.assertEqual(sorted(Path(p).name for p in found), ["java.md", "space.txt"])
 
+    def test_gentle_mode_limits_threads_then_restores(self):
+        seen = []
+        self.embedder.threads = None
+        original = self.embedder.embed_documents
+
+        def spy(texts, title="none"):
+            seen.append(self.embedder.threads)
+            return original(texts, title)
+
+        self.embedder.embed_documents = spy
+        self.memory.update(threads=2, pause_seconds=0.01)
+        self.assertEqual(seen, [2, 2])
+        self.assertIsNone(self.embedder.threads)  # searches run at full speed again
+
     def test_only_changes_are_reread(self):
         self.memory.update()
         calls = self.embedder.calls

@@ -45,6 +45,10 @@ class Config:
     # Folder names to leave out of memory (wildcards allowed, e.g. "old-*").
     # Program installs (folders with both bin/ and lib/ inside) are skipped anyway.
     memory_skip: list[str] = field(default_factory=list)
+    # Gentle indexing (plain /index): fewer cores + a short rest per file = cooler laptop.
+    # "/index fast" ignores these and uses every core.
+    index_threads: int = 2
+    index_pause_seconds: float = 0.5
     # Small model that makes the "meaning fingerprints" for search
     embed_model: str = "embeddinggemma"
 

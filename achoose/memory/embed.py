@@ -16,6 +16,8 @@ class OllamaEmbedder:
         self.name = model
         self._http = OllamaBrain(model, host=host)
         self._gemma_style = "embeddinggemma" in model
+        # None = let Ollama use every core. A small number keeps the laptop cool.
+        self.threads: int | None = None
 
     def embed_documents(self, texts: list[str], title: str = "none") -> list[list[float]]:
         if self._gemma_style:
@@ -30,9 +32,10 @@ class OllamaEmbedder:
     def _embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for i in range(0, len(texts), 16):  # small batches keep memory use low
-            data = self._http._post(
-                "/api/embed", {"model": self.name, "input": texts[i : i + 16], "keep_alive": "10m"}
-            )
+            body = {"model": self.name, "input": texts[i : i + 16], "keep_alive": "10m"}
+            if self.threads:
+                body["options"] = {"num_thread": self.threads}
+            data = self._http._post("/api/embed", body)
             vectors = data.get("embeddings")
             if not vectors:
                 raise BrainError(f"Ollama returned no embeddings from {self.name}")

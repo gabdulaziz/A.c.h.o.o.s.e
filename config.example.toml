@@ -33,6 +33,11 @@ memory_folders = ["~/Documents", "~/Downloads"]
 # (folders containing both bin/ and lib/) are always skipped.
 memory_skip = []
 
+# Gentle indexing for plain /index: processor threads to use, and a rest after each file.
+# Cooler and quieter, about 2-3x slower. "/index fast" always uses every core.
+index_threads = 2
+index_pause_seconds = 0.5
+
 # Small model that makes the "meaning fingerprints" for search (ollama pull embeddinggemma)
 embed_model = "embeddinggemma"
 
