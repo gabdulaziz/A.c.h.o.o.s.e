@@ -33,6 +33,30 @@ class TextTests(unittest.TestCase):
             self.assertFalse(heard_yes(text), text)
 
 
+class WakeWordNameTests(unittest.TestCase):
+    def test_labels(self):
+        from achoose.voice.engine import wake_word_label
+
+        self.assertEqual(wake_word_label("hey_jarvis"), "Hey Jarvis")
+        self.assertEqual(wake_word_label("hey_jarvis_v0.1"), "Hey Jarvis")
+        self.assertEqual(wake_word_label("/home/j/Achoose/wake_words/hey_achoose.onnx"), "Hey Achoose")
+
+    def test_trained_files_come_first_and_jarvis_stays_as_backup(self):
+        from achoose.config import Config
+        from achoose.voice.engine import find_wake_words
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Config(data_dir=Path(tmp))
+            self.assertEqual(find_wake_words(config), ["hey_jarvis"])
+            (Path(tmp) / "wake_words").mkdir()
+            (Path(tmp) / "wake_words" / "hey_achoose.onnx").write_bytes(b"")
+            found = find_wake_words(config)
+            self.assertEqual(found[-1], "hey_jarvis")
+            self.assertTrue(found[0].endswith("hey_achoose.onnx"))
+            config.wake_word = ["hey_jarvis", "~/x/alexa.onnx"]
+            self.assertTrue(find_wake_words(config)[-1].endswith("x/alexa.onnx"))
+
+
 @unittest.skipUnless(HAS_NUMPY, "numpy not installed")
 class RecordingTests(unittest.TestCase):
     def blocks(self, pattern):
@@ -123,6 +147,8 @@ class VoiceLoopTests(unittest.TestCase):
                 pass
 
         class Wake:
+            phrase, spoken, threshold = "“Hey Achoose”", "Hey Achoose", 0.5
+
             def wait(self_, frames, should_stop=lambda: False, on_near_miss=None):
                 return True
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .engine import FRAME, RATE, Ears, Microphone, Mouth, VoiceSetupError, WakeWord
+from .engine import FRAME, RATE, Ears, Microphone, Mouth, VoiceSetupError, WakeWord, find_wake_words
 
 
 def _step(title: str) -> None:
@@ -99,26 +99,31 @@ def run_check(config) -> int:
         problems.append("speech-to-text")
         print(f"FAILED: {err}")
 
-    _step("5. Wake word (say “Hey Jarvis” a few times in the next 10 s)")
+    _step("5. Wake word (say it a few times in the next 10 s)")
     try:
-        wake = WakeWord(config.wake_word, config.wake_threshold)
+        wake = WakeWord(find_wake_words(config), config.wake_threshold)
+        print(f"Say {wake.phrase} now...", flush=True)
         frames = mic.frames()
-        best = 0.0
+        best = {label: 0.0 for label in wake.labels.values()}
         try:
             for i, block in enumerate(frames):
-                score = max(wake.model.predict(block).values())
-                best = max(best, float(score))
-                if score >= 0.1:
-                    print(f"  score {score:.2f}" + ("  <- WAKE" if score >= wake.threshold else ""), flush=True)
+                for key, score in wake.model.predict(block).items():
+                    label = wake.labels.get(key, key)
+                    best[label] = max(best[label], float(score))
+                    if score >= 0.1:
+                        mark = "  <- WAKE" if score >= wake.threshold else ""
+                        print(f"  {label}: {score:.2f}{mark}", flush=True)
                 if i * FRAME >= 10 * RATE:
                     break
         finally:
             frames.close()
-        print(f"Best score: {best:.2f} (wakes at {wake.threshold})")
-        if best < wake.threshold:
+        for label, score in best.items():
+            print(f"Best score for “{label}”: {score:.2f} (wakes at {wake.threshold})")
+        top = max(best.values(), default=0.0)
+        if top < wake.threshold:
             problems.append("wake word not heard")
-            if best >= 0.2:
-                print(f"Tip: set wake_threshold = {max(0.2, round(best - 0.1, 1))} in the settings file.")
+            if top >= 0.2:
+                print(f"Tip: set wake_threshold = {max(0.2, round(top - 0.1, 1))} in the settings file.")
             else:
                 print("Tip: check the microphone (step 3), or use --push-to-talk for now.")
     except Exception as err:

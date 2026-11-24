@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def start_voice(agent: Agent, config, push_to_talk: bool) -> int:
-    from .voice.engine import Ears, Microphone, Mouth, VoiceSetupError, WakeWord
+    from .voice.engine import Ears, Microphone, Mouth, VoiceSetupError, WakeWord, find_wake_words
     from .voice.loop import run_voice
 
     print("Starting voice mode (the first start downloads the speech models)...")
@@ -192,7 +192,9 @@ def start_voice(agent: Agent, config, push_to_talk: bool) -> int:
         print(f"Microphone: {mic.describe()}")
         mouth = Mouth(Path(config.data_dir) / "voices" / f"{config.voice_name}.onnx", config.voice_speed)
         ears = Ears(config.stt_model)
-        wake = None if push_to_talk else WakeWord(config.wake_word, config.wake_threshold)
+        wake = None if push_to_talk else WakeWord(find_wake_words(config), config.wake_threshold)
+        if wake:
+            print(f"Wake word: {wake.phrase}")
     except VoiceSetupError as err:
         print(f"[voice setup] {err}")
         return 1

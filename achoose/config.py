@@ -56,7 +56,9 @@ class Config:
     voice_name: str = "en_GB-alan-medium"  # Piper voice: calm British male
     voice_speed: float = 1.0  # 1.2 = a bit faster, 0.9 = a bit slower
     stt_model: str = "base.en"  # speech-to-text model; "small.en" is more accurate but slower
-    wake_word: str = "hey_jarvis"
+    # Built-in wake word(s) or paths to .onnx files. Trained files put in
+    # <data_dir>/wake_words/ are always added, so this one stays as a backup.
+    wake_word: str | list[str] = "hey_jarvis"
     wake_threshold: float = 0.5  # higher = fewer false wake-ups, but may miss you
     call_user: str = "sir"  # how Achoose addresses you; "" for nothing
     input_device: str = ""  # microphone number or name part; "" = system default (see --voice-check)
