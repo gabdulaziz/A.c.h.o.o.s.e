@@ -38,6 +38,11 @@ class Config:
     # Folders Achoose may read on its own. Reading anywhere else is refused.
     read_folders: list[Path] = field(default_factory=lambda: [Path("~")])
 
+    # Memory: folders Achoose indexes so it can search inside your files
+    memory_folders: list[Path] = field(default_factory=lambda: [Path("~/Documents")])
+    # Small model that makes the "meaning fingerprints" for search
+    embed_model: str = "embeddinggemma"
+
     # How many past messages to keep in the conversation (keeps it fast)
     history_messages: int = 20
 
@@ -47,6 +52,7 @@ class Config:
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir).expanduser()
         self.read_folders = [Path(p).expanduser().resolve() for p in self.read_folders]
+        self.memory_folders = [Path(p).expanduser().resolve() for p in self.memory_folders]
 
 
 _ENV = {

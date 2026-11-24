@@ -22,6 +22,12 @@ achoose/
   tools/        things Achoose can do
     base.py       what a tool is, and its risk level (READ or CHANGE)
     builtin.py    time, list folder, read file, save note
+    memory_tool.py  search_my_files (search inside indexed folders)
+  memory/       private search index over folders you choose
+    extract.py    text out of txt/code/html/pdf/docx/pptx, cut into pieces
+    store.py      SQLite file with a word index + meaning fingerprints
+    embed.py      fingerprints from a small Ollama model (embeddinggemma)
+    indexer.py    reads new/changed files, forgets deleted ones
   agent.py      the thinking loop and the confirmation gate
   config.py     settings (see config.example.toml)
   cli.py        the text chat in your terminal
@@ -65,12 +71,30 @@ python3 scripts/benchmark.py qwen3:4b-instruct-2507-q4_K_M llama3.2:3b
 To use a different model, either run `ACHOOSE_MODEL=llama3.2:3b python3 -m achoose`, or copy
 `config.example.toml` to `~/.config/achoose/config.toml` and change `model`.
 
+## Memory setup (search inside your files)
+
+Achoose can build a private search index of folders you choose (`~/Documents` by default)
+and answer questions from them. Everything stays on your computer, in `~/Achoose/memory.db`.
+
+```bash
+cd ~/achoose
+sudo apt install -y python3-venv          # lets Python make private package folders
+python3 -m venv .venv                     # make one inside ~/achoose
+.venv/bin/pip install -r requirements.txt # numpy + PDF/Word/PowerPoint readers, only in .venv
+ollama pull embeddinggemma                # small model for "meaning fingerprints"
+.venv/bin/python -m achoose               # start Achoose, then type /index
+```
+
+From then on start Achoose with `.venv/bin/python -m achoose` (from `~/achoose`).
+To index other folders, set `memory_folders` in `~/.config/achoose/config.toml`.
+
 ## Chat commands
 
-`/help`, `/tools`, `/stats` (speed of the last answer), `/reset` (forget the chat), `/quit`.
+`/help`, `/tools`, `/stats` (speed of the last answer), `/reset` (forget the chat),
+`/index` (read new or changed files in the memory folders), `/quit`.
 
 ## Running the tests
 
 ```bash
-python3 -m unittest -v
+.venv/bin/python -m unittest -v   # memory tests are skipped if the packages are missing
 ```

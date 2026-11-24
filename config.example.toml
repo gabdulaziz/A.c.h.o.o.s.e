@@ -26,6 +26,12 @@ data_dir = "~/Achoose"
 # Folders Achoose may read without asking. Reading elsewhere is refused.
 read_folders = ["~"]
 
+# Folders Achoose indexes so it can search inside your files (type /index in the chat)
+memory_folders = ["~/Documents"]
+
+# Small model that makes the "meaning fingerprints" for search (ollama pull embeddinggemma)
+embed_model = "embeddinggemma"
+
 # How many past messages Achoose remembers within one chat
 history_messages = 20
 

@@ -9,13 +9,16 @@ from typing import Any
 from .agent import Agent
 from .brain import BrainError, OllamaBrain, make_brain
 from .config import CONFIG_PATH, load_config
+from .memory import open_memory
 from .tools import Risk, Tool, ToolRegistry, builtin_tools
+from .tools.memory_tool import memory_tools
 
 HELP = """Commands:
   /help    show this help
   /tools   list what Achoose can do
   /stats   speed of the last answer
   /reset   forget this conversation
+  /index   read new or changed files in your memory folders
   /quit    leave (or press Ctrl+D)"""
 
 
@@ -85,6 +88,10 @@ def main() -> int:
             return 1
 
     tools = ToolRegistry(builtin_tools(config))
+    memory, why_not = open_memory(config)
+    if memory:
+        for tool in memory_tools(memory):
+            tools.add(tool)
     agent = Agent(
         brain,
         tools,
@@ -95,6 +102,7 @@ def main() -> int:
     )
 
     print(f"Achoose is ready (brain: {brain.name}). Type /help for commands.")
+    print(memory_status(memory, why_not))
     if not CONFIG_PATH.exists():
         print(f"(Using default settings. Your own settings file would go in {CONFIG_PATH})")
 
@@ -113,6 +121,11 @@ def main() -> int:
                 return 0
             if cmd == "/help":
                 print(HELP)
+            elif cmd == "/index":
+                if memory:
+                    run_index(memory)
+                else:
+                    print(why_not)
             elif cmd == "/reset":
                 agent.reset()
                 print("Conversation forgotten.")
@@ -141,6 +154,65 @@ def main() -> int:
         if not stream.end_line():  # nothing was shown live, so show it now
             print(f"Achoose: {answer or '(no answer)'}")
         print(f"  ({time.perf_counter() - started:.1f} s)")
+
+
+def memory_status(memory, why_not: str) -> str:
+    if not memory:
+        return f"(Note: {why_not})"
+    folders = ", ".join(_short(p) for p in memory.folders)
+    files, pieces = memory.store.counts()
+    if files == 0:
+        return f"Memory: nothing indexed yet. Type /index to read {folders}."
+    return f"Memory: {files} files ({pieces} pieces) from {folders}. Type /index to refresh."
+
+
+def run_index(memory) -> None:
+    folders = ", ".join(_short(p) for p in memory.folders)
+    missing = [p for p in memory.folders if not p.is_dir()]
+    for p in missing:
+        print(f"  (folder {_short(p)} does not exist, skipped)")
+    print(f"Indexing {folders}. The first time can take a while; later runs only read changes.")
+    print("Press Ctrl+C to stop. Finished files are kept, and the next /index continues.")
+    started = time.perf_counter()
+
+    def progress(done: int, total: int, path: str) -> None:
+        if total == 0:
+            return
+        elapsed = time.perf_counter() - started
+        eta = ""
+        if done >= 3:
+            left = elapsed / done * (total - done)
+            eta = f", about {left / 60:.0f} min left" if left >= 90 else f", about {left:.0f} s left"
+        name = path.rsplit("/", 1)[-1][:40]
+        print(f"\r  {done}/{total} files{eta}  {name:<40}", end="", flush=True)
+
+    try:
+        report = memory.update(progress)
+    except KeyboardInterrupt:
+        print("\n  Stopped. Type /index to continue later.")
+        return
+    except BrainError as err:
+        print(f"\n[problem] {err}")
+        return
+    print()
+    print(
+        f"Done in {report.seconds:.0f} s: {report.added} new, {report.updated} changed, "
+        f"{report.removed} removed, {report.unchanged} unchanged."
+    )
+    if report.missing_packages:
+        print(f"  Skipped some documents: missing Python package(s) {', '.join(sorted(report.missing_packages))}.")
+    if report.failed:
+        print(f"  {len(report.failed)} file(s) could not be read, for example: {report.failed[0]}")
+    print(memory_status(memory, ""))
+
+
+def _short(path) -> str:
+    from pathlib import Path
+
+    try:
+        return "~/" + str(Path(path).relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def print_stats(agent: Agent) -> None:
