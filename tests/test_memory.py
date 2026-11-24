@@ -158,6 +158,21 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(seen, [2, 2])
         self.assertIsNone(self.embedder.threads)  # searches run at full speed again
 
+    def test_find_my_files_lists_all_matches(self):
+        from achoose.tools.memory_tool import memory_tools
+
+        labs = self.docs / "Java_OOP"
+        labs.mkdir()
+        for i in range(1, 10):
+            (labs / f"OOP_Lab_{i:02}.html").write_text(f"<p>Lab {i} about classes</p>")
+        self.memory.update()
+        tool = {t.name: t for t in memory_tools(self.memory)}["find_my_files"]
+        self.assertTrue(tool.show_directly)
+        out = tool.run(name="lab")
+        self.assertTrue(out.startswith("9 files"))
+        self.assertIn("OOP_Lab_09.html", out)
+        self.assertIn("No indexed file", tool.run(name="zebra"))
+
     def test_only_changes_are_reread(self):
         self.memory.update()
         calls = self.embedder.calls
@@ -184,7 +199,7 @@ class MemoryTests(unittest.TestCase):
     def test_search_tool_output(self):
         from achoose.tools.memory_tool import memory_tools
 
-        tool = memory_tools(self.memory)[0]
+        tool = {t.name: t for t in memory_tools(self.memory)}["search_my_files"]
         self.assertIn("/index", tool.run(query="java"))  # nothing indexed yet
         self.memory.update()
         out = tool.run(query="java midterm")
