@@ -45,6 +45,7 @@ embed_model = "embeddinggemma"
 voice_name = "en_GB-alan-medium"   # Piper voice, a calm British male
 voice_speed = 1.0                  # 1.2 = a bit faster, 0.9 = a bit slower
 stt_model = "base.en"              # "small.en" understands better but is slower
+stt_hints = true                   # give the speech model your app and folder names (helps with accents)
 wake_word = "hey_jarvis"            # backup; trained files in ~/Achoose/wake_words/ are added automatically
 wake_threshold = 0.5               # higher = fewer false wake-ups, but may miss you
 call_user = "sir"                  # how Achoose addresses you; "" for nothing

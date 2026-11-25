@@ -156,6 +156,21 @@ Achoose never runs a command the brain made up: apps are started only from the i
 files only go to the Trash (never deleted for good), and only inside your home folder. Your main folders
 (Documents, Downloads, ...), hidden settings folders and Achoose's own folders are refused.
 
+### When Achoose mishears you
+
+* Voice mode tells the speech model the names of your apps and folders (setting `stt_hints`), so an
+  accent or a slip is more likely to come out as a real name.
+* If a name is close but not exact ("Teratra"), Achoose asks **"Did you mean Terminal, sir?"** instead of
+  giving up. Say yes and it carries on; deleting still asks "Shall I?" afterwards.
+
+### Other languages (test only)
+
+```bash
+.venv/bin/python -m achoose --hear-test ru     # Russian; tg = Tajik, auto = it guesses
+.venv/bin/python -m achoose --hear-test tg --hear-model small   # bigger, slower, better
+```
+Shows what a multilingual speech model heard and how long it took. Nothing in your settings changes.
+
 ## Chat commands
 
 `/help`, `/tools`, `/stats` (speed of the last answer), `/reset` (forget the chat),

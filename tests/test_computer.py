@@ -137,10 +137,10 @@ class ComputerTests(unittest.TestCase):
     def run_tool(self, tool_name, /, **args):
         return self.tools.get(tool_name).run(**args)
 
-    def agent(self, replies, confirm):
+    def agent(self, replies, confirm, ask=None):
         tools = ToolRegistry(builtin_tools(self.config) + list(self.tools))
         brain = ScriptedBrain(replies)
-        return Agent(brain, tools, confirm=confirm), brain
+        return Agent(brain, tools, confirm=confirm, ask=ask), brain
 
     # ---- apps ----
 
@@ -188,6 +188,63 @@ class ComputerTests(unittest.TestCase):
 
     def test_exec_placeholders_are_dropped(self):
         self.assertEqual(exec_to_argv('"/opt/My App/run" --x %U %%done'), ["/opt/My App/run", "--x", "%done"])
+
+    # ---- "Did you mean ...?" ----
+
+    def test_misheard_app_asks_did_you_mean(self):
+        for said, expected in [("Teratra", "Terminal"), ("Firefocks", "Firefox Web Browser")]:
+            questions = []
+            agent, _ = self.agent(
+                [BrainReply("", tool_calls=[ToolCall("open_app", {"name": said})])],
+                confirm=lambda t, a: self.fail("asked to confirm"),
+                ask=lambda q: questions.append(q) or True,
+            )
+            self.assertEqual(agent.ask(f"open {said}"), f"Opened {expected}.", said)
+            self.assertEqual(questions, [f"Did you mean {expected}?"])
+
+    def test_did_you_mean_no_tells_the_brain(self):
+        agent, brain = self.agent(
+            [BrainReply("", tool_calls=[ToolCall("open_app", {"name": "Teratra"})]), BrainReply("Which app, sir?")],
+            confirm=lambda t, a: False,
+            ask=lambda q: False,
+        )
+        self.assertEqual(agent.ask("open teratra"), "Which app, sir?")
+        result = [m for m in brain.seen[-1] if m.role == "tool"][-1].content
+        self.assertIn("closest is Terminal", result)
+        self.assertIn("said no", result)
+        self.assertEqual(self.runner.started, [])
+
+    def test_nonsense_is_not_guessed(self):
+        questions = []
+        agent, brain = self.agent(
+            [BrainReply("", tool_calls=[ToolCall("open_app", {"name": "Photoshop"})]), BrainReply("Not installed.")],
+            confirm=lambda t, a: False,
+            ask=lambda q: questions.append(q) or True,
+        )
+        agent.ask("open photoshop")
+        self.assertEqual(questions, [])
+
+    def test_misheard_folder_guess_then_still_confirms_delete(self):
+        (self.home / "Downloads" / "Alparslan").mkdir()
+        questions, confirms = [], []
+        agent, _ = self.agent(
+            [call("move_to_trash", path="Arslan")],
+            confirm=lambda t, a: confirms.append(t.describe(a)) or True,
+            ask=lambda q: questions.append(q) or True,
+        )
+        self.assertEqual(agent.ask("delete arslan"), "Moved Alparslan to the Trash. You can get it back from there.")
+        self.assertEqual(questions, ["Did you mean the folder Alparslan in Downloads?"])
+        self.assertEqual(len(confirms), 1)  # deleting still asks "Shall I?"
+
+    def test_speech_hints_list_apps_and_folders(self):
+        from achoose.tools.computer import speech_hints
+
+        hints = speech_hints(self.apps, self.home)
+        self.assertIn("Terminal", hints)
+        self.assertIn("Visual Studio Code", hints)
+        self.assertIn("old", hints)  # a folder in Downloads
+        self.assertNotIn(".ssh", hints)
+        self.assertLessEqual(len(speech_hints(self.apps * 50, self.home, limit=300)), 300)
 
     # ---- files and websites ----
 

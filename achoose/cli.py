@@ -41,6 +41,16 @@ def ask_user_to_confirm(tool: Tool, arguments: dict[str, Any]) -> bool:
     return allowed
 
 
+def ask_user_yes_no(question: str) -> bool:
+    stream.end_line()
+    try:
+        answer = input(f"\n  ?  {question} [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer in ("y", "yes")
+
+
 class Stream:
     """Prints the answer as it is written, and keeps tool lines tidy."""
 
@@ -83,8 +93,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--voice-check", action="store_true", help="test microphone, speaker, speech and wake word one by one"
     )
+    parser.add_argument(
+        "--hear-test",
+        metavar="LANG",
+        help="try hearing another language: ru (Russian), tg (Tajik), auto. Changes no settings",
+    )
+    parser.add_argument("--hear-model", default="base", help="speech model for --hear-test: base (default) or small")
     args = parser.parse_args(argv)
     config = load_config()
+    if args.hear_test:
+        from .voice.check import run_hear_test
+
+        return run_hear_test(config, args.hear_test, args.hear_model)
     if args.voice_check:
         from .voice.check import run_check
 
@@ -113,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         brain,
         tools,
         confirm=ask_user_to_confirm,
+        ask=ask_user_yes_no,
         on_tool=show_tool_step,
         history_messages=config.history_messages,
         max_tool_rounds=config.max_tool_rounds,
@@ -192,6 +213,10 @@ def start_voice(agent: Agent, config, push_to_talk: bool) -> int:
         print(f"Microphone: {mic.describe()}")
         mouth = Mouth(Path(config.data_dir) / "voices" / f"{config.voice_name}.onnx", config.voice_speed)
         ears = Ears(config.stt_model)
+        if config.stt_hints:
+            from .tools.computer import speech_hints
+
+            ears.hints = speech_hints()
         wake = None if push_to_talk else WakeWord(find_wake_words(config), config.wake_threshold)
         if wake:
             print(f"Wake word: {wake.phrase}")

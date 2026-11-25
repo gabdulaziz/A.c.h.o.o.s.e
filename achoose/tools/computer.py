@@ -27,7 +27,7 @@ from typing import Callable
 from urllib.parse import quote, urlparse
 
 from ..config import Config
-from .base import Risk, Tool, ToolError
+from .base import Risk, Tool, ToolError, Unsure
 
 # Folders that are never moved to the Trash themselves (things inside them can be).
 PROTECTED_NAMES = {
@@ -248,8 +248,18 @@ def _norm(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
 
 
+SURE = 0.6  # score needed to open an app without asking
+GUESS = 0.36  # score needed to ask "Did you mean ...?"
+
+
 def find_app(apps: list[App], wanted: str) -> tuple[App | None, list[App]]:
     """Best match for what the user said, plus close alternatives."""
+    app, _, close = match_app(apps, wanted)
+    return app, close
+
+
+def match_app(apps: list[App], wanted: str) -> tuple[App | None, App | None, list[App]]:
+    """(sure match, a guess worth asking about, other close names)."""
     said = _norm(wanted)
     said = ALIASES.get(said, said)
     core = " ".join(FILLER.sub(" ", said).split()) or said
@@ -269,14 +279,73 @@ def find_app(apps: list[App], wanted: str) -> tuple[App | None, list[App]]:
             return 0.8
         if words and words <= set(_norm(app.generic).split()):
             return 0.75
-        return SequenceMatcher(None, core, name).ratio() * 0.7
+        return sounds_like(core, app) * 0.75
 
-    ranked = sorted(apps, key=score, reverse=True)
+    scores = {a.id: score(a) for a in apps}
+    ranked = sorted(apps, key=lambda a: scores[a.id], reverse=True)
     if not ranked:
-        return None, []
+        return None, None, []
     best = ranked[0]
-    close = [a for a in ranked[1:4] if score(a) >= 0.5]
-    return (best if score(best) >= 0.6 else None), ([best] + close if score(best) < 0.6 else close)
+    if scores[best.id] >= SURE:
+        return best, None, [a for a in ranked[1:4] if scores[a.id] >= 0.5]
+    guess = best if scores[best.id] >= GUESS else None
+    return None, guess, [a for a in ranked[:4] if scores[a.id] >= 0.3]
+
+
+def sounds_like(said: str, app: App) -> float:
+    """How close a mis-heard name is to the app (0 to 1). Compares letters with
+    spaces removed, against the full name, each long word of it, and the
+    alias words people use ("vs cold" ~ "vs code" -> VS Code)."""
+    s = _squash(said)
+    if not s:
+        return 0.0
+    names = [_norm(app.name), _norm(app.id).split()[-1] if _norm(app.id) else "", _norm(app.generic)]
+    names += [w for w in _norm(app.name).split() if len(w) >= 4]
+    names += [alias for alias, target in ALIASES.items() if target and target in _norm(app.name)]
+    best = 0.0
+    for name in filter(None, names):
+        best = max(best, SequenceMatcher(None, s, _squash(name)).ratio())
+    return best
+
+
+def speech_hints(apps: list[App] | None = None, home: Path | None = None, limit: int = 600) -> str:
+    """A short text of the names you are likely to say, for the speech model:
+    the command words, your apps, and the folders in your main folders."""
+    apps = installed_apps() if apps is None else apps
+    home = home or Path.home()
+    names: list[str] = []
+
+    def add(name: str) -> None:
+        name = name.strip()
+        if name and not name.startswith(".") and name not in names and len(name) <= 30:
+            names.append(name)
+
+    for app in sorted(apps, key=lambda a: len(a.name)):  # short, everyday names first
+        if "(" not in app.name:
+            add(app.name)
+    folders: list[str] = []
+    for top in ("Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", ""):
+        base = home / top if top else home
+        try:
+            kids = sorted((p for p in base.iterdir() if p.is_dir()), key=lambda p: -p.stat().st_mtime)
+        except OSError:
+            continue
+        for kid in kids[:12]:  # most recently used first
+            if not kid.name.startswith(".") and kid.name not in folders:
+                folders.append(kid.name)
+    text = "Achoose: open, close, delete, Trash, folder, file, shut down, restart, lock. "
+    apps_part = ", ".join(names)
+    room = max(0, limit - len(text) - 20)
+    if len(apps_part) > room // 2:
+        apps_part = apps_part[: room // 2].rsplit(",", 1)[0]
+    text += "Apps: " + apps_part + ". "
+    folders_part = ", ".join(folders)
+    room = max(0, limit - len(text) - 10)
+    if len(folders_part) > room:
+        folders_part = folders_part[:room].rsplit(",", 1)[0]
+    if folders_part:
+        text += "Folders: " + folders_part + "."
+    return text
 
 
 def exec_to_argv(exec_line: str, app: App | None = None) -> list[str]:
@@ -310,14 +379,23 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
 
     # ---- open an app ----
 
-    def open_app(name: str, new_window: bool = False) -> str:
+    def _pick_app(name: str, arguments: dict) -> App:
         if not (name or "").strip():
             raise ToolError("No app name given.")
-        apps = app_list()
-        app, close = find_app(apps, name)
+        app, guess, close = match_app(app_list(), name)
+        if app is None and guess is not None:
+            raise Unsure(
+                f"Did you mean {guess.name}?",
+                {**arguments, "name": guess.name},
+                f"No app called '{name}'; the closest is {guess.name}.",
+            )
         if app is None:
             hint = f" Did you mean: {', '.join(a.name for a in close)}?" if close else ""
             raise ToolError(f"No installed app called '{name}'.{hint}")
+        return app
+
+    def open_app(name: str, new_window: bool = False) -> str:
+        app = _pick_app(name, {"name": name, "new_window": new_window})
         if _truthy(new_window) and app.new_window_exec():
             runner.start(exec_to_argv(app.new_window_exec(), app))
             return f"Opened a new {app.name} window."
@@ -341,12 +419,7 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         return family
 
     def _app_processes(name: str) -> tuple[App, list[int]]:
-        if not (name or "").strip():
-            raise ToolError("No app name given.")
-        app, close = find_app(app_list(), name)
-        if app is None:
-            hint = f" Did you mean: {', '.join(a.name for a in close)}?" if close else ""
-            raise ToolError(f"No installed app called '{name}'.{hint}")
+        app = _pick_app(name, {"name": name})
         wanted = app.process_names()
         procs = runner.processes()
         matching = {pid: ppid for pid, ppid, names in procs if names & wanted}
@@ -402,6 +475,8 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         if not path.exists() and ("/" in target or target.startswith("~")) and path.parent.is_dir() and path.name:
             try:
                 path = _find_by_name(path.name, base=path.parent)  # e.g. wrong capitals
+            except Unsure as unsure:
+                raise Unsure(unsure.question, {"target": unsure.arguments["path"]}, str(unsure)) from None
             except ToolError:
                 pass
         if not path.exists():
@@ -435,6 +510,7 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
             raise ToolError("No file or folder name given.")
         exact: list[Path] = []
         close: list[tuple[float, Path]] = []
+        guess: tuple[float, Path] | None = None
         deadline = time.monotonic() + SEARCH_SECONDS
         for root, dirs, files in os.walk(base):
             depth = len(Path(root).relative_to(base).parts)
@@ -450,9 +526,19 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
                     ratio = max(SequenceMatcher(None, wanted, squashed).ratio(), SequenceMatcher(None, wanted, stem).ratio())
                     if ratio >= 0.85:
                         close.append((ratio, path))
+                    elif ratio >= 0.6 and (guess is None or ratio > guess[0]):
+                        guess = (ratio, path)
             if time.monotonic() > deadline:
                 break
         matches = exact or [p for _, p in sorted(close, key=lambda c: -c[0])]
+        if not matches and guess:
+            g = guess[1]
+            kind = "folder" if g.is_dir() else "file"
+            raise Unsure(
+                f"Did you mean the {kind} {g.name} in {_place(g)}?",
+                {"path": str(g)},
+                f"Nothing called '{raw}'; the closest is {_short(g)}.",
+            )
         if not matches:
             where = "your home folder" if base == home else _short(base)
             raise ToolError(f"Nothing called '{raw}' was found in {where}. Ask the user to check the name.")

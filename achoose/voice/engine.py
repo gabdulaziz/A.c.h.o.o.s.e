@@ -130,7 +130,7 @@ def record_until_silence(
 
 
 class Ears:
-    def __init__(self, model: str = "base.en") -> None:
+    def __init__(self, model: str = "base.en", language: str | None = None) -> None:
         try:
             from faster_whisper import WhisperModel
         except ImportError:
@@ -138,6 +138,12 @@ class Ears:
         # int8 = small and fast on a laptop CPU. The model downloads on first use.
         self.model = WhisperModel(model, device="cpu", compute_type="int8")
         self.english_only = model.endswith(".en")
+        # None = the model guesses the language; e.g. "ru" forces Russian
+        self.language = "en" if self.english_only else language
+        self.last_language = ""  # what the model thought you spoke
+        # Names the user is likely to say (apps, folders). Whisper leans towards
+        # these spellings, so "Telegran" or "Teratra" come out as real names.
+        self.hints = ""
 
     def transcribe(self, audio: np.ndarray, short_answer: bool = False) -> str:
         """short_answer=True for a one-word reply like "yes": the speech filter
@@ -145,13 +151,17 @@ class Ears:
         if audio.size < RATE // 4:  # under a quarter second: nothing said
             return ""
         samples = audio.astype(np.float32) / 32768.0
-        segments, _ = self.model.transcribe(
+        segments, info = self.model.transcribe(
             samples,
-            language="en" if self.english_only else None,
+            language=self.language,
             beam_size=1,  # fastest; good enough for short requests
             vad_filter=not short_answer,  # ignore silence and background noise
+            # not for yes/no: a list of names there could turn a "yes" into a name
+            initial_prompt=(self.hints or None) if not short_answer else None,
         )
-        return " ".join(s.text.strip() for s in segments).strip()
+        text = " ".join(s.text.strip() for s in segments).strip()
+        self.last_language = getattr(info, "language", "") or ""
+        return text
 
 
 # ---- mouth --------------------------------------------------------------

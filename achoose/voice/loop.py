@@ -61,7 +61,17 @@ def run_voice(
         end_line()
         question = tool.describe(arguments).splitlines()[0].rstrip(".")
         print(f"\n  ⚠  Achoose wants to do this: {tool.describe(arguments)}")
-        mouth.say(f"{question}. Shall I{sir}?")
+        return ask_and_hear(f"{question}. Shall I{sir}?")
+
+    def ask_by_voice(question: str) -> bool:
+        """'Did you mean Terminal, sir?'"""
+        end_line()
+        spoken = question.rstrip("?") + f"{sir}?"
+        print(f"\n  ?  {spoken}")
+        return ask_and_hear(spoken)
+
+    def ask_and_hear(spoken: str) -> bool:
+        mouth.say(spoken)
         for attempt in (1, 2):
             mouth.wait()
             mouth.beep()
@@ -70,12 +80,13 @@ def run_voice(
             if answer or attempt == 2:
                 break
             print("  (heard nothing, asking again)")
-            mouth.say(f"Sorry{sir}, I didn't hear you. Shall I?")
+            mouth.say(f"Sorry{sir}, I didn't hear you. {spoken}")
         allowed = heard_yes(answer)
         print(f"  You said: {answer or '(nothing)'}  →  {'✓ allowed' if allowed else '✗ declined'}")
         return allowed
 
     agent.confirm = confirm_by_voice  # the safety rule still applies, now by voice
+    agent.ask_user = ask_by_voice  # "Did you mean ...?" questions, by voice
     agent.voice = True  # answers are spoken: the brain keeps them short
 
     if wake:

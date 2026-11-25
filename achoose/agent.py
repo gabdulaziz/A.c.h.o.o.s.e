@@ -12,10 +12,12 @@ from datetime import datetime
 from typing import Any, Callable
 
 from .brain import Brain, BrainStats, Message, ToolCall
-from .tools import Risk, Tool, ToolError, ToolRegistry
+from .tools import Risk, Tool, ToolError, ToolRegistry, Unsure
 
 # Asked before any CHANGE tool runs. Return True only if the user said yes.
 ConfirmFn = Callable[[Tool, dict[str, Any]], bool]
+# Asks the user a plain yes/no question ("Did you mean Terminal?").
+AskFn = Callable[[str], bool]
 # Told about every tool step, so the screen can show what is happening.
 ToolEventFn = Callable[[str, dict[str, Any], str], None]
 
@@ -129,6 +131,7 @@ class Agent:
         max_tool_rounds: int = 5,
         memory_folders: str = "",
         call_user: str = "",
+        ask: AskFn | None = None,
     ) -> None:
         """memory_folders: e.g. "~/Documents, ~/Downloads" when search_my_files is available."""
         self.brain = brain
@@ -139,6 +142,7 @@ class Agent:
         self.max_tool_rounds = max_tool_rounds
         self.memory_folders = memory_folders
         self.call_user = call_user
+        self.ask_user = ask or (lambda question: False)
         self.voice = False  # set True in voice mode: answers are spoken
         self.history: list[Message] = []
         self.last_stats: list[BrainStats] = []
@@ -205,7 +209,7 @@ class Agent:
 
     # ---- internals ----------------------------------------------------
 
-    def _run_tool(self, call: ToolCall) -> tuple[str, bool]:
+    def _run_tool(self, call: ToolCall, guessed: bool = False) -> tuple[str, bool]:
         """Run one tool through the safety gate. Returns (result, worked)."""
         ok = False
         tool = self.tools.get(call.name)
@@ -220,6 +224,11 @@ class Agent:
                 else:
                     result = tool.run(**call.arguments)
                     ok = True
+            except Unsure as unsure:
+                # Close but not exact (an accent or a mis-heard word): ask, don't fail.
+                if not guessed and self.ask_user(unsure.question):
+                    return self._run_tool(ToolCall(call.name, unsure.arguments), guessed=True)
+                result = f"Error: {unsure} The user said no, that is not what they meant."
             except ToolError as err:
                 result = f"Error: {err}"
             except TypeError as err:  # wrong or missing arguments from the model

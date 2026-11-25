@@ -136,3 +136,58 @@ def run_check(config) -> int:
         return 1
     print("Everything works. Start voice mode with: .venv/bin/python -m achoose --voice")
     return 0
+
+
+LANGUAGES = {"ru": "Russian", "tg": "Tajik", "en": "English", "auto": "any language (the model guesses)"}
+
+
+def run_hear_test(config, language: str = "auto", model: str = "base", rounds: int = 3) -> int:
+    """Try hearing another language with a multilingual speech model.
+
+    Nothing in Achoose's settings changes: this only shows what the model
+    heard and how long it took, so you can judge if it is good enough.
+    """
+    from .engine import record_until_silence
+
+    language = language.lower()
+    if language not in LANGUAGES:
+        print(f"Unknown language '{language}'. Use one of: {', '.join(LANGUAGES)}")
+        return 1
+    if model.endswith(".en"):
+        print("That model only knows English. Use base, small or medium.")
+        return 1
+    _step(f"Hearing test: {LANGUAGES[language]}, speech model '{model}'")
+    try:
+        mic = Microphone(config.input_device or None)
+        started = time.perf_counter()
+        print(f"Loading the speech model (the first time downloads it: base ~145 MB, small ~480 MB)...", flush=True)
+        ears = Ears(model, language=None if language == "auto" else language)
+    except (VoiceSetupError, Exception) as err:
+        print(f"FAILED: {err}")
+        return 1
+    print(f"Loaded in {time.perf_counter() - started:.1f} s.")
+    results = []
+    for n in range(1, rounds + 1):
+        try:
+            input(f"\n[{n}/{rounds}] Press Enter, then say one sentence (for example a command for Achoose)... ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        frames = mic.frames()
+        try:
+            audio = record_until_silence(frames, wait_for_speech_seconds=6.0)
+        finally:
+            frames.close()
+        if audio.size == 0:
+            print("  Heard nothing (was the microphone too quiet?)")
+            continue
+        started = time.perf_counter()
+        text = ears.transcribe(audio)
+        took = time.perf_counter() - started
+        results.append(took)
+        print(f"  Heard: {text!r}")
+        print(f"  Language it thought: {ears.last_language or '?'}   ({took:.1f} s to understand)")
+    if results:
+        print(f"\nAverage {sum(results) / len(results):.1f} s per sentence.")
+        print("Was the text right? Tell Claude what you said and what it heard.")
+    return 0

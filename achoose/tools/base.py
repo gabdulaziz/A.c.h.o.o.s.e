@@ -31,6 +31,18 @@ class ToolError(Exception):
     """A tool failed in an expected way. The message is shown to the brain."""
 
 
+class Unsure(ToolError):
+    """The tool found something close to what was asked, but not exactly.
+
+    Achoose asks the user `question` ("Did you mean Terminal?"). On a yes the
+    tool runs again with `arguments` (the safety gate still applies)."""
+
+    def __init__(self, question: str, arguments: dict[str, Any], message: str = "") -> None:
+        super().__init__(message or question)
+        self.question = question
+        self.arguments = arguments
+
+
 @dataclass
 class Tool:
     name: str
