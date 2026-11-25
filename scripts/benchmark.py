@@ -104,6 +104,8 @@ CASES = [
         "move_to_trash",
         lambda a: _text(a, "path").endswith("old-notes.txt"),
     ),
+    Case("Delete the folder Alparslan.", "move_to_trash", lambda a: "alparslan" in _text(a, "path").replace(" ", "")),
+    Case("Close VS Code.", "close_app", lambda a: "code" in _text(a, "name")),
     Case("Shut down the computer.", "shut_down_or_restart", lambda a: _text(a, "action") == "shutdown"),
     Case("Lock my screen.", "lock_or_sleep", lambda a: _text(a, "action") == "lock"),
     Case("Hi! How are you today?", None),

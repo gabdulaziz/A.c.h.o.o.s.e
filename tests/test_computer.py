@@ -23,6 +23,16 @@ from .test_agent import ScriptedBrain, call
 
 class FakeRunner:
     def __init__(self, gio: bool = False, run_code: int = 0) -> None:
+        self.stopped: list[int] = []
+        # (pid, parent pid, names): VS Code with a helper, and Achoose's own terminal
+        me = os.getpid()
+        self.procs = [
+            (100, 1, {"code"}),
+            (101, 100, {"code"}),
+            (200, 1, {"gnome-terminal-", "gnome-terminal-server"}),
+            (201, 200, {"bash"}),
+            (me, 201, {"python3"}),
+        ]
         self.started: list[list[str]] = []
         self.ran: list[list[str]] = []
         self.gio = gio
@@ -37,6 +47,12 @@ class FakeRunner:
 
     def has(self, program):
         return program == "gio" and self.gio
+
+    def processes(self):
+        return self.procs
+
+    def stop(self, pid):
+        self.stopped.append(pid)
 
 
 DESKTOP = {
@@ -208,7 +224,7 @@ class ComputerTests(unittest.TestCase):
         )
         answer = agent.ask("delete my old folder")
         self.assertEqual(answer, "Moved old to the Trash. You can get it back from there.")
-        self.assertIn("Move the folder old (2 files, 7 B) to the Trash", asked[0])
+        self.assertIn("Move the folder old from Downloads (2 files, 7 B) to the Trash", asked[0])
         self.assertFalse((self.home / "Downloads/old").exists())
         trash = self.home / ".local/share/Trash"
         self.assertEqual((trash / "files/old/b.txt").read_text(), "bbbb")
@@ -253,6 +269,66 @@ class ComputerTests(unittest.TestCase):
         self.assertFalse(link.is_symlink())
         self.assertTrue((self.home / "Downloads/old/a.txt").exists())
 
+    def test_trash_by_name_finds_it_anywhere_in_home(self):
+        target = self.home / "Projects" / "history" / "Alparslan"
+        target.mkdir(parents=True)
+        (target / "notes.txt").write_text("x")
+        asked = []
+        for said in ("Alparslan", "Alp Arslan", "alparslan folder", "Alp Arslen"):
+            tool = self.tools.get("move_to_trash")
+            tool.check(path=said)
+            asked.append(tool.describe({"path": said}).splitlines()[0])
+        self.assertTrue(all(a.startswith("Move the folder Alparslan from history (1 files") for a in asked), asked)
+        agent, _ = self.agent([call("move_to_trash", path="Alp Arslan")], confirm=lambda t, a: True)
+        self.assertEqual(agent.ask("delete Alp Arslan"), "Moved Alparslan to the Trash. You can get it back from there.")
+        self.assertFalse(target.exists())
+
+    def test_trash_by_name_never_guesses_between_several(self):
+        (self.home / "Documents" / "old").mkdir(parents=True)
+        agent, brain = self.agent(
+            [call("move_to_trash", path="old"), BrainReply("Which one?")],
+            confirm=lambda t, a: self.fail("asked"),
+        )
+        agent.ask("delete old")
+        result = [m for m in brain.seen[-1] if m.role == "tool"][-1].content
+        self.assertIn("Several things are called 'old'", result)
+        self.assertIn("~/Documents/old", result)
+        self.assertIn("~/Downloads/old", result)
+
+    def test_trash_by_name_skips_hidden_folders_and_unknown_names(self):
+        for said in ("id", "Zebra"):
+            with self.assertRaisesRegex(Exception, "Nothing called"):
+                self.tools.get("move_to_trash").check(path=said)
+
+    # ---- closing apps ----
+
+    def test_close_app_asks_first_and_stops_only_the_main_program(self):
+        asked = []
+        agent, _ = self.agent(
+            [BrainReply("", tool_calls=[ToolCall("close_app", {"name": "VS Code"})])], confirm=lambda t, a: asked.append(t.describe(a)) or True
+        )
+        self.assertEqual(agent.ask("close vs code"), "Closed Visual Studio Code.")
+        self.assertIn("Close Visual Studio Code (all its windows)", asked[0])
+        self.assertEqual(self.runner.stopped, [100])
+
+    def test_close_app_declined_or_not_open(self):
+        agent, _ = self.agent([BrainReply("", tool_calls=[ToolCall("close_app", {"name": "code"})]), BrainReply("Left it open.")], confirm=lambda t, a: False)
+        agent.ask("close code")
+        self.assertEqual(self.runner.stopped, [])
+        with self.assertRaisesRegex(Exception, "not open"):
+            self.tools.get("close_app").check(name="firefox")
+
+    def test_close_app_refuses_to_close_its_own_terminal(self):
+        with self.assertRaisesRegex(Exception, "close me too"):
+            self.tools.get("close_app").check(name="terminal")
+        self.assertEqual(self.runner.stopped, [])
+
+    def test_real_process_list_reads(self):
+        from achoose.tools.computer import Runner
+
+        procs = Runner().processes()
+        self.assertIn(os.getpid(), [pid for pid, _, _ in procs])
+
     # ---- power ----
 
     def test_shutdown_asks_first_and_waits_a_moment(self):
@@ -280,7 +356,7 @@ class ComputerTests(unittest.TestCase):
 
     def test_which_tools_ask_first(self):
         risky = sorted(t.name for t in self.tools if t.risk.asks_first)
-        self.assertEqual(risky, ["move_to_trash", "shut_down_or_restart"])
+        self.assertEqual(risky, ["close_app", "move_to_trash", "shut_down_or_restart"])
         self.assertTrue(all(t.risk in (Risk.ACT, Risk.CHANGE) for t in self.tools))
 
     def test_system_prompt_mentions_computer_control_only_when_available(self):

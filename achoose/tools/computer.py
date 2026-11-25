@@ -1,9 +1,10 @@
-"""Computer control: open apps, files, folders and websites; move things to
-the Trash; lock, sleep, shut down or restart.
+"""Computer control: open and close apps; open files, folders and websites;
+move things to the Trash; lock, sleep, shut down or restart.
 
 Safety:
   * Opening things and locking/sleeping run on their own (Risk.ACT).
-  * Moving to the Trash, shutting down and restarting always ask first (Risk.CHANGE).
+  * Closing apps, moving to the Trash, shutting down and restarting always
+    ask first (Risk.CHANGE).
   * Achoose never runs a command the brain made up. Apps are started only from
     the app list your app menu uses (.desktop files). Files go to the Trash,
     never deleted for good, and only inside your home folder.
@@ -15,7 +16,9 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -33,6 +36,11 @@ PROTECTED_NAMES = {
 }
 POWER_DELAY_SECONDS = 5  # time to finish speaking before the computer goes off
 COUNT_LIMIT = 20_000  # stop counting files in huge folders (keeps the question quick)
+SEARCH_SECONDS = 4.0  # longest search of the home folder for a name to delete
+SEARCH_DEPTH = 7  # how many folders deep that search goes
+SKIP_SEARCH = {"node_modules", "__pycache__", "venv", ".venv", "site-packages", "snap"}
+# Process names that differ from the app's start command
+EXTRA_PROCESS_NAMES = {"gnome-terminal": ["gnome-terminal-server"]}
 
 # What people say -> words in the app's real name
 ALIASES = {
@@ -88,6 +96,39 @@ class Runner:
     def has(self, program: str) -> bool:
         return shutil.which(program) is not None
 
+    def processes(self) -> list[tuple[int, int, set[str]]]:
+        """Your own running programs: (process id, parent id, names)."""
+        found = []
+        uid = os.getuid()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat().st_uid != uid:
+                    continue
+                stat = (entry / "stat").read_text()
+                comm = stat[stat.index("(") + 1 : stat.rindex(")")]
+                ppid = int(stat[stat.rindex(")") + 2 :].split()[1])
+                names = {comm}
+                try:
+                    names.add(Path(os.readlink(entry / "exe")).name.removesuffix(" (deleted)"))
+                except OSError:
+                    pass
+                cmd = (entry / "cmdline").read_bytes().split(b"\0")[0].decode(errors="replace")
+                if cmd:
+                    names.add(Path(cmd).name)
+            except (OSError, ValueError):
+                continue
+            found.append((int(entry.name), ppid, names))
+        return found
+
+    def stop(self, pid: int) -> None:
+        """Ask a program to quit politely (the same signal as logging out)."""
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
 
 # ---- the installed apps ---------------------------------------------------
 
@@ -99,8 +140,29 @@ class App:
     exec: str
     path: Path
     generic: str = ""
+    wm_class: str = ""
     keywords: list[str] = field(default_factory=list)
     actions: dict[str, tuple[str, str]] = field(default_factory=dict)  # id -> (name, exec)
+
+    def process_names(self) -> set[str]:
+        """Names its running program is likely to have, e.g. {'code'}."""
+        names = set()
+        try:
+            argv = shlex.split(self.exec)
+        except ValueError:
+            argv = self.exec.split()
+        # skip "env", "VAR=value" and similar wrappers
+        while argv and (Path(argv[0]).name in ("env", "flatpak") or "=" in argv[0] or argv[0].startswith("-")):
+            if Path(argv[0]).name == "flatpak":
+                return {self.id.split(".")[-1].lower(), self.wm_class.lower()} - {""}
+            argv = argv[1:]
+        if argv:
+            names.add(Path(argv[0]).name)
+        if self.wm_class:
+            names.add(self.wm_class.lower())
+        for n in list(names):
+            names.update(EXTRA_PROCESS_NAMES.get(n, []))
+        return {n[:15] for n in names} | names  # the kernel cuts names at 15 letters
 
     def new_window_exec(self) -> str | None:
         for action_id, (name, cmd) in self.actions.items():
@@ -162,6 +224,7 @@ def parse_desktop_file(path: Path) -> App | None:
         exec=entry["Exec"],
         path=path,
         generic=entry.get("GenericName", ""),
+        wm_class=entry.get("StartupWMClass", ""),
         keywords=[k for k in entry.get("Keywords", "").split(";") if k],
         actions=actions,
     )
@@ -266,6 +329,51 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         runner.start(exec_to_argv(app.exec, app))
         return f"Opened {app.name}."
 
+    # ---- close an app ----
+
+    def _own_family() -> set[int]:
+        """Achoose itself and the programs it runs inside (e.g. the Terminal)."""
+        procs = {pid: ppid for pid, ppid, _ in runner.processes()}
+        family, pid = set(), os.getpid()
+        while pid and pid not in family:
+            family.add(pid)
+            pid = procs.get(pid, 0)
+        return family
+
+    def _app_processes(name: str) -> tuple[App, list[int]]:
+        if not (name or "").strip():
+            raise ToolError("No app name given.")
+        app, close = find_app(app_list(), name)
+        if app is None:
+            hint = f" Did you mean: {', '.join(a.name for a in close)}?" if close else ""
+            raise ToolError(f"No installed app called '{name}'.{hint}")
+        wanted = app.process_names()
+        procs = runner.processes()
+        matching = {pid: ppid for pid, ppid, names in procs if names & wanted}
+        if not matching:
+            raise ToolError(f"{app.name} is not open.")
+        if set(matching) & _own_family():
+            raise ToolError(f"I am running inside {app.name}, so closing it would close me too. Close it yourself.")
+        # Only the main program of each app: its helpers close along with it.
+        tops = [pid for pid, ppid in matching.items() if ppid not in matching]
+        return app, tops
+
+    def check_close(name: str) -> None:
+        _app_processes(name)
+
+    def explain_close(name: str = "") -> str:
+        try:
+            app, _ = _app_processes(name)
+        except ToolError as err:
+            return str(err)
+        return f"Close {app.name} (all its windows).\n  Unsaved work in it may be lost."
+
+    def close_app(name: str) -> str:
+        app, pids = _app_processes(name)
+        for pid in pids:
+            runner.stop(pid)
+        return f"Closed {app.name}."
+
     # ---- open a file, folder or website ----
 
     def _website(target: str) -> str | None:
@@ -306,16 +414,61 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
 
     # ---- move to the Trash ----
 
+    found_cache: dict[str, tuple[float, Path]] = {}
+
+    def _find_by_name(raw: str) -> Path:
+        """Search the home folder for a file or folder called (roughly) raw."""
+        cached = found_cache.get(raw)
+        if cached and time.monotonic() - cached[0] < 120:
+            return cached[1]
+        words = [w for w in re.split(r"\s+", raw) if w.lower() not in ("the", "my", "folder", "file", "directory")]
+        wanted = _squash(" ".join(words) or raw)
+        if not wanted:
+            raise ToolError("No file or folder name given.")
+        exact: list[Path] = []
+        close: list[tuple[float, Path]] = []
+        deadline = time.monotonic() + SEARCH_SECONDS
+        for root, dirs, files in os.walk(home):
+            depth = len(Path(root).relative_to(home).parts)
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_SEARCH and depth < SEARCH_DEPTH]
+            for name in dirs + files:
+                if name.startswith("."):
+                    continue
+                squashed, stem = _squash(name), _squash(Path(name).stem)
+                path = Path(root) / name
+                if wanted in (squashed, stem):
+                    exact.append(path)
+                elif not exact:
+                    ratio = max(SequenceMatcher(None, wanted, squashed).ratio(), SequenceMatcher(None, wanted, stem).ratio())
+                    if ratio >= 0.85:
+                        close.append((ratio, path))
+            if time.monotonic() > deadline:
+                break
+        matches = exact or [p for _, p in sorted(close, key=lambda c: -c[0])]
+        if not matches:
+            raise ToolError(f"Nothing called '{raw}' was found in your home folder. Ask the user to check the name.")
+        if len(matches) > 1:
+            shown = "\n".join(f"  {_short(m)}{'/' if m.is_dir() else ''}" for m in matches[:6])
+            more = f"\n  ...and {len(matches) - 6} more" if len(matches) > 6 else ""
+            raise ToolError(
+                f"Several things are called '{raw}':\n{shown}{more}\n"
+                "Ask the user which one, then call move_to_trash again with its full path."
+            )
+        found_cache[raw] = (time.monotonic(), matches[0])
+        return matches[0]
+
     def _trash_target(path: str) -> Path:
         raw = (path or "").strip()
         if not raw:
             raise ToolError("No file or folder given.")
         p = _home_path(raw)
+        if not p.exists() and not p.is_symlink() and "/" not in raw and not raw.startswith("~"):
+            p = _find_by_name(raw)  # just a name: look for it
         # Resolve the folder it is in, but not the item itself: a shortcut (link)
         # is trashed as a link, never the thing it points to.
         p = p.parent.resolve() / p.name
         if not p.exists() and not p.is_symlink():
-            raise ToolError(f"{_short(p)} does not exist. If you only know the name, find its full path with find_my_files first.")
+            raise ToolError(f"{_short(p)} does not exist.")
         if home not in p.parents:
             raise ToolError(f"Not allowed: {p} is outside your home folder.")
         rel = p.relative_to(home)
@@ -341,13 +494,18 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         if p.is_dir() and not p.is_symlink():
             files, size, more = _count(p)
             count = f"{files}{'+' if more else ''} files, {_human_size(size)}"
-            return f"Move the folder {p.name} ({count}) to the Trash.\n  Where: {_short(p)}\n  You can get it back from the Trash."
+            return f"Move the folder {p.name} from {_place(p)} ({count}) to the Trash.\n  Where: {_short(p)}\n  You can get it back from the Trash."
         size = p.lstat().st_size
-        return f"Move {p.name} ({_human_size(size)}) to the Trash.\n  Where: {_short(p)}\n  You can get it back from the Trash."
+        return f"Move {p.name} from {_place(p)} ({_human_size(size)}) to the Trash.\n  Where: {_short(p)}\n  You can get it back from the Trash."
+
+    def _place(p: Path) -> str:
+        """Spoken-friendly folder name: 'Documents', 'your home folder'."""
+        return "your home folder" if p.parent == home else p.parent.name
 
     def move_to_trash(path: str) -> str:
         p = _trash_target(path)
         send_to_trash(p, trash_dir())
+        found_cache.clear()
         return f"Moved {p.name} to the Trash. You can get it back from there."
 
     # ---- power ----
@@ -416,14 +574,25 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
             required=["target"],
         ),
         Tool(
+            name="close_app",
+            description="Close an app and all its windows. Open folders are windows of the Files app.",
+            run=close_app,
+            risk=Risk.CHANGE,
+            show_directly=True,
+            check=check_close,
+            explain=explain_close,
+            parameters={"name": {"type": "string", "description": "App name, e.g. VS Code, or Files for folders"}},
+            required=["name"],
+        ),
+        Tool(
             name="move_to_trash",
-            description="Delete a file or folder by moving it to the Trash. Needs the full path.",
+            description="Delete a file or folder by moving it to the Trash. Give its full path, or just its name.",
             run=move_to_trash,
             risk=Risk.CHANGE,
             show_directly=True,
             check=check_trash,
             explain=explain_trash,
-            parameters={"path": {"type": "string", "description": "Full path, e.g. ~/Downloads/old.zip"}},
+            parameters={"path": {"type": "string", "description": "Full path like ~/Downloads/old.zip, or just the name like Alparslan"}},
             required=["path"],
         ),
         Tool(
@@ -499,6 +668,11 @@ def _count(folder: Path) -> tuple[int, int, bool]:
             if files >= COUNT_LIMIT:
                 return files, size, True
     return files, size, False
+
+
+def _squash(text: str) -> str:
+    """'Alp Arslan', 'alp-arslan' and 'Alparslan' all become 'alparslan'."""
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
 def _truthy(value) -> bool:

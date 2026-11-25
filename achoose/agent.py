@@ -44,9 +44,10 @@ NO_ACCESS = re.compile(
 
 
 COMPUTER_PROMPT = """
-You can also control this computer: open apps, files, folders and websites, move files to the Trash, lock, sleep, shut down or restart.
+You can also control this computer: open and close apps, open files, folders and websites, delete (move to the Trash), lock, sleep, shut down or restart.
 When the user asks for one of these, call the tool at once. The user is asked to confirm risky steps automatically, so never ask "are you sure" yourself.
-To open or delete a file you only know by name, find its full path with find_my_files first."""
+To delete, call move_to_trash with the full path or just the name the user said. To close an open folder, close the app "Files".
+To open a file you only know by name, find its full path with find_my_files first."""
 
 
 VOICE_PROMPT = """

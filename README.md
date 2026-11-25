@@ -25,7 +25,7 @@ achoose/
   tools/        things Achoose can do
     base.py       what a tool is, and its risk level (READ or CHANGE)
     builtin.py    time, list folder, read file, save note
-    computer.py   open apps/files/websites, move to Trash, lock, sleep, shut down, restart
+    computer.py   open/close apps, open files/websites, move to Trash, lock, sleep, shut down, restart
     memory_tool.py  search_my_files (search inside indexed folders)
   memory/       private search index over folders you choose
     extract.py    text out of txt/code/html/pdf/docx/pptx, cut into pieces
@@ -147,7 +147,8 @@ Things you can ask (typed or spoken):
 | "Open VS Code", "open Firefox" | Starts the app from your app menu's list | no |
 | "Open a new terminal window" | Uses the app's own "New Window" | no |
 | "Open my Downloads folder", "open youtube.com" | Opens it like a double-click / in your browser | no |
-| "Delete ~/Downloads/old.zip" | Moves it to the **Trash** (restore it from the Files app) | **yes** |
+| "Close VS Code", "close my Downloads folder" | Asks the app to quit (all its windows; folders are Files windows) | **yes** |
+| "Delete Alparslan", "delete ~/Downloads/old.zip" | Finds it by name in your home folder (close spelling is fine; asks which one if there are several) and moves it to the **Trash** (restore it from the Files app) | **yes** |
 | "Shut down" / "Restart" | Turns off / restarts after 5 seconds. Save your work first | **yes** |
 | "Lock my screen" / "Go to sleep" | Locks the screen / suspends | no |
 
