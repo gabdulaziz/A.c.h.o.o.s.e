@@ -298,11 +298,15 @@ class ComputerTests(unittest.TestCase):
             ("Tell me how many videos are inside the Alparslan folder inside the download folder.", "Alparslan has 1 video."),
             ("How many pictures are in the Alparslan folder?", "Alparslan has 1 picture."),
             ("What's in my alparslan folder?", "Alparslan: 2 items"),
+            ("how many videos are found in Alparslan folder located inside Downloads folder", "Alparslan has 1 video."),
+            ("How many videos are stored in the Alparslan folder which is in my Downloads folder?", "Alparslan has 1 video."),
         ]
         for said, start in cases:
             agent, brain = self.agent([], confirm=lambda t, a: False, ask=lambda q: self.fail(q))
             answer = agent.ask(said)
             self.assertIn(start, answer.splitlines()[0], f"{said} -> {answer}")
+            if said.lower().startswith("how many"):
+                self.assertEqual(len(answer.splitlines()), 1, answer)  # just the number
             self.assertEqual(brain.seen, [])
 
     def test_accented_folder_name_asks_did_you_mean(self):

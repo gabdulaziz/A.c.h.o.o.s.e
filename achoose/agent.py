@@ -95,8 +95,8 @@ FOLDER_QUESTION = re.compile(
     r"can you|could you|show me)\W+)*"
     r"(?:(?P<count>how many)|what(?:'s| is| are)?|which|list|show(?: me)?|count)\s+"
     r"(?P<what>.*?)\s*(?:(?:are|is|do i have|there|have i got|i have)\s+)*"
-    r"(?:in|inside|within)\s+(?:my\s+|the\s+)?(?P<name>[\w .'-]+?)\s+(?:folder|directory)"
-    r"(?:\s+(?:in|inside|from)\s+(?:my\s+|the\s+)?[\w .'-]+?\s+(?:folder|directory))?"
+    r"(?:(?:found|stored|saved|kept)\s+)?(?:in|inside|within)\s+(?:my\s+|the\s+)?(?P<name>[\w .'-]+?)\s+(?:folder|directory)"
+    r"(?:\s+(?:(?:that|which)\s+is\s+|located\s+|that's\s+)?(?:in|inside|from|under)\s+(?:my\s+|the\s+)?[\w .'-]+?\s+(?:folder|directory))?"
     r"(?:\s+(?:please|sir))*\W*$",
     re.IGNORECASE,
 )
@@ -116,7 +116,7 @@ def folder_question(text: str) -> dict | None:
     kind = {"pdfs": "pdf", "zips": "archives"}.get(kind, kind)
     if m.group("count") and not kind:
         kind = "files" if "file" in " ".join(words) else ""
-    return {"path": m.group("name").strip(), "only": kind}
+    return {"path": m.group("name").strip(), "only": kind, "_count": bool(m.group("count"))}
 
 
 def build_system_prompt(
@@ -216,13 +216,15 @@ class Agent:
             # Not found: the brain sees what went wrong and answers.
         look = folder_question(text) if self.tools.get("list_folder") else None
         if look and not folder:
+            count_only = look.pop("_count")
             call = ToolCall("list_folder", look)
             self.history.append(Message("assistant", "", tool_calls=[call]))
             result, ok = self._run_tool(call)
             self.history.append(Message("tool", result, tool_name=call.name))
             if ok:
                 self.history.append(Message("assistant", "(The result above was shown to the user.)"))
-                return result
+                # "How many ...?" gets just the number, not the whole list.
+                return result.splitlines()[0] if count_only and look["only"] else result
         if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
             call = ToolCall("get_current_time", {})
             self.history.append(Message("assistant", "", tool_calls=[call]))
