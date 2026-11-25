@@ -102,10 +102,14 @@ def builtin_tools(config: Config) -> list[Tool]:
             label = f"{category}s" if category and category != "music" else (category or f".{kind} files")
             entries = [e for e in entries if not e[1] and e[2].lower().rsplit(".", 1)[-1] in endings]
             deeper = _count_inside(folder, endings) - len(entries)
-            also = f" Also {deeper} more inside its subfolders." if deeper > 0 else ""
-            lines.append(f"{label.capitalize()} ({len(entries)}):{also}")
+            also = f", and {deeper} more inside its subfolders" if deeper > 0 else ""
+            # The answer first (voice mode speaks only the first line).
             if not entries:
-                return "\n".join(lines[:1] + [f"No {label} right in this folder.{also}"])
+                deeper_part = f", but {deeper} inside its subfolders" if deeper > 0 else ""
+                return f"No {label} right in {folder.name}{deeper_part}."
+            one = label[:-1] if label.endswith("s") else label  # "1 video", "1 .pdf file"
+            lines[0] = f"{folder.name} has {len(entries)} {one if len(entries) == 1 else label}{also}."
+            lines.append(f"{label.capitalize()} ({len(entries)}):")
         if len(entries) > MAX_LIST_ENTRIES:
             lines.append(f"The {MAX_LIST_ENTRIES} most recently changed:")
         for mtime, is_dir, name, size in entries[:MAX_LIST_ENTRIES]:

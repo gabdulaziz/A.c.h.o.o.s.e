@@ -164,6 +164,14 @@ files only go to the Trash (never deleted for good), and only inside your home f
 * If a name is close but not exact ("Teratra"), Achoose asks **"Did you mean Terminal, sir?"** instead of
   giving up. Say yes and it carries on; deleting still asks "Shall I?" afterwards.
 
+### Compare speech models on your voice
+
+```bash
+.venv/bin/python -m achoose --hear-test en --hear-model base.en    # the default: fast
+.venv/bin/python -m achoose --hear-test en --hear-model small.en   # hears accents better, ~2-3x slower
+```
+If small.en is clearly better for you, put `stt_model = "small.en"` in `~/.config/achoose/config.toml`.
+
 ### Other languages (test only)
 
 ```bash

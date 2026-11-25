@@ -420,7 +420,10 @@ class NameFinder:
                     ratio = max(SequenceMatcher(None, wanted, squashed).ratio(), SequenceMatcher(None, wanted, stem).ratio())
                     if ratio >= 0.85:
                         close.append((ratio, depth, path))
-                    elif ratio >= 0.6 and (guess is None or ratio > guess[0]):
+                        continue
+                    # Accents change vowels and soft sounds most: compare the "sound skeleton" too.
+                    ratio = max(ratio, SequenceMatcher(None, _sound(wanted), _sound(stem)).ratio() - 0.05)
+                    if ratio >= 0.55 and (guess is None or ratio > guess[0]):
                         guess = (ratio, path)
             if time.monotonic() > deadline:
                 break
@@ -821,6 +824,19 @@ def _count(folder: Path) -> tuple[int, int, bool]:
 def _squash(text: str) -> str:
     """'Alp Arslan', 'alp-arslan' and 'Alparslan' all become 'alparslan'."""
     return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _sound(text: str) -> str:
+    """A rough "how it sounds" key: 'alpacland' and 'alparslan' come closer.
+    Similar-sounding letters are made the same, vowels (after the first
+    letter) are dropped, and doubled letters are made single."""
+    t = _squash(text)
+    for a, b in (("ph", "f"), ("ck", "k"), ("q", "k"), ("c", "k"), ("z", "s"), ("w", "v"), ("x", "ks"), ("y", "i")):
+        t = t.replace(a, b)
+    if not t:
+        return t
+    t = t[0] + re.sub(r"[aeiou]", "", t[1:])
+    return re.sub(r"(.)\1+", r"\1", t)
 
 
 def _truthy(value) -> bool:

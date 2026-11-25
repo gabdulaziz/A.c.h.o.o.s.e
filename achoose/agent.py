@@ -84,9 +84,39 @@ TIME_QUESTION = re.compile(
 OPEN_FOLDER = re.compile(
     r"^\W*(?:(?:hey|hi|ok|okay|so|please|achoose|jarvis|can you|could you|would you)\W+)*"
     r"open\s+(?:up\s+)?(?:my\s+|the\s+|a\s+)?(?P<name>[\w .'-]+?)\s+(?:folder|directory)"
+    r"(?:\s+(?:in|inside|from)\s+(?:my\s+|the\s+)?[\w .'-]+?\s+(?:folder|directory))?"
     r"(?:\s+(?:please|for me|sir))*\W*$",
     re.IGNORECASE,
 )
+# "How many videos are inside the Alparslan folder (inside the Downloads folder)?",
+# "What's in my Downloads folder?": answered by looking in the folder, without the brain.
+FOLDER_QUESTION = re.compile(
+    r"^\W*(?:(?:hey|hi|ok|okay|so|please|achoose|jarvis|tell me|can you tell me|could you tell me|"
+    r"can you|could you|show me)\W+)*"
+    r"(?:(?P<count>how many)|what(?:'s| is| are)?|which|list|show(?: me)?|count)\s+"
+    r"(?P<what>.*?)\s*(?:(?:are|is|do i have|there|have i got|i have)\s+)*"
+    r"(?:in|inside|within)\s+(?:my\s+|the\s+)?(?P<name>[\w .'-]+?)\s+(?:folder|directory)"
+    r"(?:\s+(?:in|inside|from)\s+(?:my\s+|the\s+)?[\w .'-]+?\s+(?:folder|directory))?"
+    r"(?:\s+(?:please|sir))*\W*$",
+    re.IGNORECASE,
+)
+KIND_WORDS = (
+    "videos", "video", "movies", "films", "pictures", "picture", "photos", "images", "pics", "music", "songs",
+    "audio", "documents", "docs", "pdfs", "pdf", "archives", "zips", "folders", "files",
+)
+
+
+def folder_question(text: str) -> dict | None:
+    """Arguments for list_folder if the text asks what is inside a folder."""
+    m = FOLDER_QUESTION.search(text.strip())
+    if not m:
+        return None
+    words = re.findall(r"[a-z]+", (m.group("what") or "").lower())
+    kind = next((w for w in words if w in KIND_WORDS), "")
+    kind = {"pdfs": "pdf", "zips": "archives"}.get(kind, kind)
+    if m.group("count") and not kind:
+        kind = "files" if "file" in " ".join(words) else ""
+    return {"path": m.group("name").strip(), "only": kind}
 
 
 def build_system_prompt(
@@ -184,6 +214,15 @@ class Agent:
                 self.history.append(Message("assistant", "(The result above was shown to the user.)"))
                 return result
             # Not found: the brain sees what went wrong and answers.
+        look = folder_question(text) if self.tools.get("list_folder") else None
+        if look and not folder:
+            call = ToolCall("list_folder", look)
+            self.history.append(Message("assistant", "", tool_calls=[call]))
+            result, ok = self._run_tool(call)
+            self.history.append(Message("tool", result, tool_name=call.name))
+            if ok:
+                self.history.append(Message("assistant", "(The result above was shown to the user.)"))
+                return result
         if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
             call = ToolCall("get_current_time", {})
             self.history.append(Message("assistant", "", tool_calls=[call]))
@@ -248,7 +287,8 @@ class Agent:
             except Unsure as unsure:
                 # Close but not exact (an accent or a mis-heard word): ask, don't fail.
                 if not guessed and self.ask_user(unsure.question):
-                    return self._run_tool(ToolCall(call.name, unsure.arguments), guessed=True)
+                    better = {**call.arguments, **unsure.arguments}  # keep the other choices (e.g. "videos")
+                    return self._run_tool(ToolCall(call.name, better), guessed=True)
                 result = f"Error: {unsure} The user said no, that is not what they meant."
             except ToolError as err:
                 result = f"Error: {err}"

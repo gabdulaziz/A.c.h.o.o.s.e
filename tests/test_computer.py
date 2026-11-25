@@ -284,10 +284,39 @@ class ComputerTests(unittest.TestCase):
         (target / "part2" / "c.mov").write_text("x")
         tools = ToolRegistry(builtin_tools(self.config))
         result = tools.get("list_folder").run(path="Al-Parslan", only="videos")
-        self.assertIn("Alparslan: 4 items", result)
-        self.assertIn("Videos (2): Also 1 more inside its subfolders.", result)
+        self.assertTrue(result.startswith("Alparslan has 2 videos, and 1 more inside its subfolders."), result)
+        self.assertIn("Videos (2):", result)
         self.assertIn("a.mp4", result)
         self.assertNotIn("notes.txt", result)
+
+    def test_spoken_folder_questions_go_straight_to_the_folder(self):
+        target = self.home / "Downloads" / "Alparslan"
+        target.mkdir()
+        (target / "a.mp4").write_text("x")
+        (target / "b.png").write_text("x")
+        cases = [
+            ("Tell me how many videos are inside the Alparslan folder inside the download folder.", "Alparslan has 1 video."),
+            ("How many pictures are in the Alparslan folder?", "Alparslan has 1 picture."),
+            ("What's in my alparslan folder?", "Alparslan: 2 items"),
+        ]
+        for said, start in cases:
+            agent, brain = self.agent([], confirm=lambda t, a: False, ask=lambda q: self.fail(q))
+            answer = agent.ask(said)
+            self.assertIn(start, answer.splitlines()[0], f"{said} -> {answer}")
+            self.assertEqual(brain.seen, [])
+
+    def test_accented_folder_name_asks_did_you_mean(self):
+        target = self.home / "Downloads" / "Alparslan"
+        target.mkdir()
+        (target / "a.mp4").write_text("x")
+        for heard in ("alpac-land", "Alpaslan", "Al Parsalan"):
+            questions = []
+            agent, _ = self.agent([], confirm=lambda t, a: False, ask=lambda q: questions.append(q) or True)
+            answer = agent.ask(f"How many videos are inside the {heard} folder?")
+            self.assertTrue(answer.startswith("Alparslan has 1 video."), f"{heard} -> {answer}")
+            self.assertLessEqual(len(questions), 1)
+            if questions:
+                self.assertEqual(questions, ["Did you mean the folder Alparslan in Downloads?"])
 
     # ---- files and websites ----
 

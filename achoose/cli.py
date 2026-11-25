@@ -96,9 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--hear-test",
         metavar="LANG",
-        help="try hearing another language: ru (Russian), tg (Tajik), auto. Changes no settings",
+        help="try how well Achoose hears you: en, ru (Russian), tg (Tajik), auto. Changes no settings",
     )
-    parser.add_argument("--hear-model", default="base", help="speech model for --hear-test: base (default) or small")
+    parser.add_argument("--hear-model", default="base", help="speech model for --hear-test: base.en, small.en (English), base, small")
     args = parser.parse_args(argv)
     config = load_config()
     if args.hear_test:

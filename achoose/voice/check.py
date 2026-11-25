@@ -138,7 +138,7 @@ def run_check(config) -> int:
     return 0
 
 
-LANGUAGES = {"ru": "Russian", "tg": "Tajik", "en": "English", "auto": "any language (the model guesses)"}
+LANGUAGES = {"en": "English", "ru": "Russian", "tg": "Tajik", "auto": "any language (the model guesses)"}
 
 
 def run_hear_test(config, language: str = "auto", model: str = "base", rounds: int = 3) -> int:
@@ -153,7 +153,7 @@ def run_hear_test(config, language: str = "auto", model: str = "base", rounds: i
     if language not in LANGUAGES:
         print(f"Unknown language '{language}'. Use one of: {', '.join(LANGUAGES)}")
         return 1
-    if model.endswith(".en"):
+    if model.endswith(".en") and language not in ("en", "auto"):
         print("That model only knows English. Use base, small or medium.")
         return 1
     _step(f"Hearing test: {LANGUAGES[language]}, speech model '{model}'")
@@ -162,6 +162,10 @@ def run_hear_test(config, language: str = "auto", model: str = "base", rounds: i
         started = time.perf_counter()
         print(f"Loading the speech model (the first time downloads it: base ~145 MB, small ~480 MB)...", flush=True)
         ears = Ears(model, language=None if language == "auto" else language)
+        if language in ("en", "auto") and getattr(config, "stt_hints", False):
+            from ..tools.computer import speech_hints
+
+            ears.hints = speech_hints()  # same help as in voice mode, for a fair comparison
     except (VoiceSetupError, Exception) as err:
         print(f"FAILED: {err}")
         return 1
