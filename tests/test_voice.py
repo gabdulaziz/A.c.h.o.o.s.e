@@ -186,7 +186,7 @@ class VoiceLoopTests(unittest.TestCase):
     def test_conversation_confirmation_and_goodbye(self):
         mouth = self.run_loop(["How are you?", "Note that I need milk", "yes", "Goodbye"])
         self.assertIn("Good evening, sir", mouth.streamed)
-        self.assertTrue(any("Shall I, sir? Say yes or no" in s for s in mouth.said))
+        self.assertTrue(any(s.endswith("Shall I, sir?") for s in mouth.said))
         self.assertTrue(list((Path(self.tmp.name) / "notes").glob("*milk*.md")))  # saved after spoken yes
         self.assertEqual(mouth.said[-1], "Goodbye, sir.")
         self.assertIn("SPOKEN aloud", self.brain.seen[0][0].content)

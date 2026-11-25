@@ -61,7 +61,7 @@ def run_voice(
         end_line()
         question = tool.describe(arguments).splitlines()[0].rstrip(".")
         print(f"\n  ⚠  Achoose wants to do this: {tool.describe(arguments)}")
-        mouth.say(f"{question}. Shall I{sir}? Say yes or no after the beep.")
+        mouth.say(f"{question}. Shall I{sir}?")
         for attempt in (1, 2):
             mouth.wait()
             mouth.beep()
@@ -70,7 +70,7 @@ def run_voice(
             if answer or attempt == 2:
                 break
             print("  (heard nothing, asking again)")
-            mouth.say(f"Sorry{sir}, I didn't hear you. Yes or no?")
+            mouth.say(f"Sorry{sir}, I didn't hear you. Shall I?")
         allowed = heard_yes(answer)
         print(f"  You said: {answer or '(nothing)'}  →  {'✓ allowed' if allowed else '✗ declined'}")
         return allowed

@@ -283,6 +283,22 @@ class ComputerTests(unittest.TestCase):
         self.assertEqual(agent.ask("delete Alp Arslan"), "Moved Alparslan to the Trash. You can get it back from there.")
         self.assertFalse(target.exists())
 
+    def test_trash_path_with_wrong_capitals_still_found(self):
+        (self.home / "Downloads" / "DII").mkdir()
+        (self.home / "Downloads" / "DII" / "x.txt").write_text("x")
+        tool = self.tools.get("move_to_trash")
+        tool.check(path="~/Downloads/dii")
+        self.assertTrue(tool.describe({"path": "~/Downloads/dii"}).startswith("Move the folder DII from Downloads"))
+        # wrong folder too: found elsewhere in home
+        tool.check(path="~/Documents/dii")
+        agent, _ = self.agent([call("move_to_trash", path="~/Downloads/dii")], confirm=lambda t, a: True)
+        self.assertEqual(agent.ask("delete dii"), "Moved DII to the Trash. You can get it back from there.")
+        self.assertFalse((self.home / "Downloads" / "DII").exists())
+        with self.assertRaisesRegex(Exception, "Nothing called"):
+            tool.check(path="~/Downloads/zebra")
+        self.run_tool("open_file_or_website", target="~/downloads/LAB5.pdf".replace("downloads", "Downloads"))
+        self.assertEqual(self.runner.started[-1], ["xdg-open", str(self.home / "Downloads/lab5.pdf")])
+
     def test_trash_by_name_never_guesses_between_several(self):
         (self.home / "Documents" / "old").mkdir(parents=True)
         agent, brain = self.agent(

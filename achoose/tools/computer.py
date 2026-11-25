@@ -399,6 +399,11 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.IGNORECASE) and not re.match(r"^https?://", target, re.IGNORECASE):
             raise ToolError("Only web links (http or https), files and folders can be opened.")
         path = _home_path(target)
+        if not path.exists() and ("/" in target or target.startswith("~")) and path.parent.is_dir() and path.name:
+            try:
+                path = _find_by_name(path.name, base=path.parent)  # e.g. wrong capitals
+            except ToolError:
+                pass
         if not path.exists():
             url = _website(target)
             if url:
@@ -416,9 +421,12 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
 
     found_cache: dict[str, tuple[float, Path]] = {}
 
-    def _find_by_name(raw: str) -> Path:
-        """Search the home folder for a file or folder called (roughly) raw."""
-        cached = found_cache.get(raw)
+    def _find_by_name(raw: str, base: Path | None = None) -> Path:
+        """Search the home folder (or base) for a file or folder called (roughly)
+        raw. Capitals, spaces and small spelling slips don't matter."""
+        base = base or home
+        key = f"{base}\0{raw}"
+        cached = found_cache.get(key)
         if cached and time.monotonic() - cached[0] < 120:
             return cached[1]
         words = [w for w in re.split(r"\s+", raw) if w.lower() not in ("the", "my", "folder", "file", "directory")]
@@ -428,8 +436,8 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         exact: list[Path] = []
         close: list[tuple[float, Path]] = []
         deadline = time.monotonic() + SEARCH_SECONDS
-        for root, dirs, files in os.walk(home):
-            depth = len(Path(root).relative_to(home).parts)
+        for root, dirs, files in os.walk(base):
+            depth = len(Path(root).relative_to(base).parts)
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_SEARCH and depth < SEARCH_DEPTH]
             for name in dirs + files:
                 if name.startswith("."):
@@ -446,7 +454,8 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
                 break
         matches = exact or [p for _, p in sorted(close, key=lambda c: -c[0])]
         if not matches:
-            raise ToolError(f"Nothing called '{raw}' was found in your home folder. Ask the user to check the name.")
+            where = "your home folder" if base == home else _short(base)
+            raise ToolError(f"Nothing called '{raw}' was found in {where}. Ask the user to check the name.")
         if len(matches) > 1:
             shown = "\n".join(f"  {_short(m)}{'/' if m.is_dir() else ''}" for m in matches[:6])
             more = f"\n  ...and {len(matches) - 6} more" if len(matches) > 6 else ""
@@ -454,7 +463,7 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
                 f"Several things are called '{raw}':\n{shown}{more}\n"
                 "Ask the user which one, then call move_to_trash again with its full path."
             )
-        found_cache[raw] = (time.monotonic(), matches[0])
+        found_cache[key] = (time.monotonic(), matches[0])
         return matches[0]
 
     def _trash_target(path: str) -> Path:
@@ -462,8 +471,17 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         if not raw:
             raise ToolError("No file or folder given.")
         p = _home_path(raw)
-        if not p.exists() and not p.is_symlink() and "/" not in raw and not raw.startswith("~"):
-            p = _find_by_name(raw)  # just a name: look for it
+        if not p.exists() and not p.is_symlink():
+            if "/" not in raw and not raw.startswith("~"):
+                p = _find_by_name(raw)  # just a name: look for it
+            elif p.parent.is_dir() and p.name:
+                # e.g. ~/Downloads/dii when the folder is called DII: look in that folder
+                try:
+                    p = _find_by_name(p.name, base=p.parent)
+                except ToolError:
+                    p = _find_by_name(p.name)  # not there: look everywhere
+            elif p.name:
+                p = _find_by_name(p.name)
         # Resolve the folder it is in, but not the item itself: a shortcut (link)
         # is trashed as a link, never the thing it points to.
         p = p.parent.resolve() / p.name
