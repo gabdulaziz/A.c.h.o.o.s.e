@@ -106,6 +106,11 @@ CASES = [
     ),
     Case("Delete the folder Alparslan.", "move_to_trash", lambda a: "alparslan" in _text(a, "path").replace(" ", "")),
     Case("Close VS Code.", "close_app", lambda a: "code" in _text(a, "name")),
+    Case(
+        "How many videos are inside the folder called Alparslan?",
+        "list_folder",
+        lambda a: "alparslan" in _text(a, "path") and "video" in _text(a, "only"),
+    ),
     Case("Shut down the computer.", "shut_down_or_restart", lambda a: _text(a, "action") == "shutdown"),
     Case("Lock my screen.", "lock_or_sleep", lambda a: _text(a, "action") == "lock"),
     Case("Hi! How are you today?", None),

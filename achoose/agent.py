@@ -33,7 +33,8 @@ Today is {today}."""
 MEMORY_PROMPT = """
 You CAN search the user's own documents and notes ({folders}) with search_my_files.
 For any question about the user's own files, notes, school work, projects or past work, call search_my_files first.
-To count or list ALL files of some kind ("how many labs", "all my PDFs about X"), use find_my_files instead.
+To count or list ALL documents of some kind ("how many labs", "all my PDFs about X"), use find_my_files instead.
+To see or count what is inside one folder (videos, pictures, anything), use list_folder with the folder's name.
 Answer from what it finds in 2 to 3 plain sentences (no headings or lists) and name the file. Give details only if the user asks.
 Never say you cannot access the user's files."""
 
@@ -48,8 +49,8 @@ NO_ACCESS = re.compile(
 COMPUTER_PROMPT = """
 You can also control this computer: open and close apps, open files, folders and websites, delete (move to the Trash), lock, sleep, shut down or restart.
 When the user asks for one of these, call the tool at once. The user is asked to confirm risky steps automatically, so never ask "are you sure" yourself.
-To delete, call move_to_trash with the full path or just the name the user said. To close an open folder, close the app "Files".
-To open a file you only know by name, find its full path with find_my_files first."""
+To open a folder or file, call open_file_or_website with its path or just its name (e.g. Downloads); never open the Files app for that.
+To delete, call move_to_trash with the full path or just the name the user said. Only to close open folders, close the app "Files"."""
 
 
 VOICE_PROMPT = """
@@ -74,6 +75,16 @@ CLOCK_QUESTION = re.compile(
 TIME_QUESTION = re.compile(
     r"\bwhat(?:'s| is)? the (?:time|date)\b|\bwhat time\b|\btime is it\b|\bcurrent (?:time|date)\b"
     r"|\bwhat day is (?:it|today)\b|\bwhat(?:'s| is) today'?s date\b",
+    re.IGNORECASE,
+)
+
+
+# "Open my Downloads folder", "open the Alparslan folder": opened straight away,
+# without the brain (it sometimes opened the Files app instead, and this is faster).
+OPEN_FOLDER = re.compile(
+    r"^\W*(?:(?:hey|hi|ok|okay|so|please|achoose|jarvis|can you|could you|would you)\W+)*"
+    r"open\s+(?:up\s+)?(?:my\s+|the\s+|a\s+)?(?P<name>[\w .'-]+?)\s+(?:folder|directory)"
+    r"(?:\s+(?:please|for me|sir))*\W*$",
     re.IGNORECASE,
 )
 
@@ -163,6 +174,16 @@ class Agent:
                 on_text(answer)
             self.history.append(Message("assistant", answer))
             return answer
+        folder = OPEN_FOLDER.search(text.strip())
+        if folder and self.tools.get("open_file_or_website"):
+            call = ToolCall("open_file_or_website", {"target": folder.group("name").strip() + " folder"})
+            self.history.append(Message("assistant", "", tool_calls=[call]))
+            result, ok = self._run_tool(call)
+            self.history.append(Message("tool", result, tool_name=call.name))
+            if ok:
+                self.history.append(Message("assistant", "(The result above was shown to the user.)"))
+                return result
+            # Not found: the brain sees what went wrong and answers.
         if TIME_QUESTION.search(text) and self.tools.get("get_current_time"):
             call = ToolCall("get_current_time", {})
             self.history.append(Message("assistant", "", tool_calls=[call]))

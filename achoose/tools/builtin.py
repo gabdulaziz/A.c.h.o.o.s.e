@@ -6,17 +6,37 @@ Three READ tools (time, list a folder, read a text file) and one CHANGE tool
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 
 from ..config import Config
 from .base import Risk, Tool, ToolError
+from .computer import NameFinder
 
 # Kept small on purpose: the model must read every line before it answers,
 # and on a laptop CPU that reading is slow.
 MAX_LIST_ENTRIES = 25
 MAX_READ_CHARS = 3_000
+COUNT_LIMIT = 20_000  # stop counting inside huge folders
+
+# What people call kinds of files -> file endings
+CATEGORIES = {
+    "video": {"mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "3gp", "mpeg", "mpg"},
+    "picture": {"jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "svg", "tiff"},
+    "music": {"mp3", "wav", "ogg", "flac", "m4a", "aac", "opus", "wma"},
+    "document": {"pdf", "doc", "docx", "odt", "txt", "rtf", "ppt", "pptx", "xls", "xlsx", "odp", "ods", "md"},
+    "archive": {"zip", "rar", "7z", "tar", "gz", "xz"},
+}
+CATEGORY_WORDS = {
+    "video": "video", "videos": "video", "movie": "video", "movies": "video", "film": "video", "films": "video",
+    "picture": "picture", "pictures": "picture", "photo": "picture", "photos": "picture", "image": "picture",
+    "images": "picture", "pic": "picture", "pics": "picture",
+    "music": "music", "song": "music", "songs": "music", "audio": "music",
+    "document": "document", "documents": "document", "docs": "document",
+    "archive": "archive", "archives": "archive", "zip": "archive",
+}
 
 
 def builtin_tools(config: Config) -> list[Tool]:
@@ -41,10 +61,16 @@ def builtin_tools(config: Config) -> list[Tool]:
         hour12 = now.hour % 12 or 12
         return now.strftime(f"%A %d %B %Y, %H:%M ({hour12}:%M %p), time zone %Z")
 
+    finder = NameFinder(Path.home().resolve())
+
     def list_folder(path: str = "~", only: str = "") -> str:
-        folder = safe_path(path)
+        raw = (path or "~").strip()
+        folder = safe_path(raw)
         if not folder.exists():
-            raise ToolError(f"{folder} does not exist.")
+            if "/" in raw or raw.startswith("~"):
+                raise ToolError(f"{folder} does not exist.")
+            # Just a name ("Alparslan"): look for that folder in the home folder.
+            folder = safe_path(str(finder.find(raw + " folder", tool="list_folder", arg="path")))
         if not folder.is_dir():
             raise ToolError(f"{folder} is a file, not a folder.")
         entries = []
@@ -71,10 +97,15 @@ def builtin_tools(config: Config) -> list[Tool]:
             entries = [e for e in entries if not e[1]]
             lines.append(f"Files ({len(entries)}):")
         elif kind and kind not in ("all", "everything"):
-            entries = [e for e in entries if not e[1] and e[2].lower().endswith("." + kind)]
-            lines.append(f".{kind} files ({len(entries)}):")
+            category = CATEGORY_WORDS.get(kind)
+            endings = CATEGORIES[category] if category else {kind}
+            label = f"{category}s" if category and category != "music" else (category or f".{kind} files")
+            entries = [e for e in entries if not e[1] and e[2].lower().rsplit(".", 1)[-1] in endings]
+            deeper = _count_inside(folder, endings) - len(entries)
+            also = f" Also {deeper} more inside its subfolders." if deeper > 0 else ""
+            lines.append(f"{label.capitalize()} ({len(entries)}):{also}")
             if not entries:
-                return "\n".join(lines[:1] + [f"No .{kind} files here."])
+                return "\n".join(lines[:1] + [f"No {label} right in this folder.{also}"])
         if len(entries) > MAX_LIST_ENTRIES:
             lines.append(f"The {MAX_LIST_ENTRIES} most recently changed:")
         for mtime, is_dir, name, size in entries[:MAX_LIST_ENTRIES]:
@@ -123,17 +154,17 @@ def builtin_tools(config: Config) -> list[Tool]:
         ),
         Tool(
             name="list_folder",
-            description="List what is inside a folder on this computer.",
+            description="List or count what is inside a folder (e.g. how many videos are in it). A folder name is enough.",
             run=list_folder,
             show_directly=True,
             parameters={
                 "path": {
                     "type": "string",
-                    "description": "Folder, e.g. ~/Downloads",
+                    "description": "Folder path like ~/Downloads, or just its name like Alparslan",
                 },
                 "only": {
                     "type": "string",
-                    "description": "Optional filter: folders, files, or a file type like pdf",
+                    "description": "Optional filter: folders, files, videos, pictures, music, documents, or a file type like pdf",
                 },
             },
             required=["path"],
@@ -160,6 +191,20 @@ def builtin_tools(config: Config) -> list[Tool]:
             explain=explain_save_note,
         ),
     ]
+
+
+def _count_inside(folder: Path, endings: set[str]) -> int:
+    """How many files with these endings are in the folder and all its subfolders."""
+    found = seen = 0
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            seen += 1
+            if not name.startswith(".") and name.lower().rsplit(".", 1)[-1] in endings:
+                found += 1
+        if seen > COUNT_LIMIT:
+            break
+    return found
 
 
 def _human_size(n: int) -> str:

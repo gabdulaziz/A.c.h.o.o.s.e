@@ -146,7 +146,8 @@ Things you can ask (typed or spoken):
 |---|---|---|
 | "Open VS Code", "open Firefox" | Starts the app from your app menu's list | no |
 | "Open a new terminal window" | Uses the app's own "New Window" | no |
-| "Open my Downloads folder", "open youtube.com" | Opens it like a double-click / in your browser | no |
+| "Open my Downloads folder", "open the Alparslan folder", "open youtube.com" | Opens it like a double-click / in your browser (a folder name is enough) | no |
+| "How many videos are in the Alparslan folder?" | Lists/counts what is inside (videos, pictures, music, documents, or a type like pdf) | no |
 | "Close VS Code", "close my Downloads folder" | Asks the app to quit (all its windows; folders are Files windows) | **yes** |
 | "Delete Alparslan", "delete ~/Downloads/old.zip" | Finds it by name in your home folder (close spelling is fine; asks which one if there are several) and moves it to the **Trash** (restore it from the Files app) | **yes** |
 | "Shut down" / "Restart" | Turns off / restarts after 5 seconds. Save your work first | **yes** |

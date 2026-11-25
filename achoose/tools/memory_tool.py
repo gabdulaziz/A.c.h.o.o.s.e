@@ -47,8 +47,9 @@ def memory_tools(memory) -> list[Tool]:
         Tool(
             name="find_my_files",
             description=(
-                "Find ALL of the user's files whose name contains some words, e.g. every 'lab' file. "
-                "Use for 'how many', 'list all' or 'find the file called' questions."
+                "Find ALL of the user's documents whose name contains some words, e.g. every 'lab' file. "
+                "Use for 'how many', 'list all' or 'find the file called' questions about documents. "
+                "Not for what is inside one folder (use list_folder)."
             ),
             run=find_my_files,
             show_directly=True,

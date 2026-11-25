@@ -364,12 +364,108 @@ def exec_to_argv(exec_line: str, app: App | None = None) -> list[str]:
     return argv
 
 
+# ---- finding a file or folder by a (mis-heard) name ------------------------
+
+
+class NameFinder:
+    """Finds a file or folder in the home folder from a name as it was heard:
+    capitals, spaces, dashes and small slips don't matter ("Al-Parslan",
+    "alparslan folder" and "Alp Arslan" all find Alparslan)."""
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self._cache: dict[str, tuple[float, Path]] = {}
+
+    def forget(self) -> None:
+        self._cache.clear()
+
+    def short(self, path: Path) -> str:
+        try:
+            return "~/" + str(path.relative_to(self.home)) if path != self.home else "~"
+        except ValueError:
+            return str(path)
+
+    def place(self, path: Path) -> str:
+        return "your home folder" if path.parent == self.home else path.parent.name
+
+    def find(self, raw: str, base: Path | None = None, tool: str = "", arg: str = "path") -> Path:
+        """Returns the one match. Raises Unsure for a close guess ("Did you
+        mean ...?") and ToolError when there is nothing or several."""
+        base = base or self.home
+        key = f"{base}\0{raw}"
+        cached = self._cache.get(key)
+        if cached and time.monotonic() - cached[0] < 120 and (cached[1].exists() or cached[1].is_symlink()):
+            return cached[1]
+        words = re.split(r"\s+", raw.strip())
+        folders_only = any(w.lower() in ("folder", "folders", "directory") for w in words)
+        words = [w for w in words if w.lower() not in ("the", "my", "a", "folder", "folders", "file", "directory", "called", "named")]
+        wanted = _squash(" ".join(words) or raw)
+        if not wanted:
+            raise ToolError("No file or folder name given.")
+        exact: list[tuple[int, Path]] = []
+        close: list[tuple[float, int, Path]] = []
+        guess: tuple[float, Path] | None = None
+        deadline = time.monotonic() + SEARCH_SECONDS
+        for root, dirs, files in os.walk(base):
+            depth = len(Path(root).relative_to(base).parts)
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_SEARCH and depth < SEARCH_DEPTH]
+            for name in dirs + ([] if folders_only else files):
+                if name.startswith("."):
+                    continue
+                squashed, stem = _squash(name), _squash(Path(name).stem)
+                path = Path(root) / name
+                if wanted in (squashed, stem):
+                    exact.append((depth, path))
+                elif not exact:
+                    ratio = max(SequenceMatcher(None, wanted, squashed).ratio(), SequenceMatcher(None, wanted, stem).ratio())
+                    if ratio >= 0.85:
+                        close.append((ratio, depth, path))
+                    elif ratio >= 0.6 and (guess is None or ratio > guess[0]):
+                        guess = (ratio, path)
+            if time.monotonic() > deadline:
+                break
+        if exact:
+            # Several with the same name: one right at the top (e.g. ~/Downloads) wins.
+            top = min(d for d, _ in exact)
+            nearest = [p for d, p in exact if d == top]
+            matches = nearest if len(nearest) == 1 else [p for _, p in exact]
+        elif close:
+            # The closest spelling wins; with a tie, the one nearest the top.
+            close.sort(key=lambda c: (-c[0], c[1]))
+            best = [c for c in close if c[0] == close[0][0] and c[1] == close[0][1]]
+            matches = [best[0][2]] if len(best) == 1 else [c[2] for c in close]
+        else:
+            matches = []
+        if not matches and guess:
+            g = guess[1]
+            kind = "folder" if g.is_dir() else "file"
+            raise Unsure(
+                f"Did you mean the {kind} {g.name} in {self.place(g)}?",
+                {arg: str(g)},
+                f"Nothing called '{raw}'; the closest is {self.short(g)}.",
+            )
+        if not matches:
+            where = "your home folder" if base == self.home else self.short(base)
+            raise ToolError(f"Nothing called '{raw}' was found in {where}. Ask the user to check the name.")
+        if len(matches) > 1:
+            shown = "\n".join(f"  {self.short(m)}{'/' if m.is_dir() else ''}" for m in matches[:6])
+            more = f"\n  ...and {len(matches) - 6} more" if len(matches) > 6 else ""
+            again = f"call {tool} again" if tool else "try again"
+            raise ToolError(
+                f"Several things are called '{raw}':\n{shown}{more}\n"
+                f"Ask the user which one, then {again} with its full path."
+            )
+        self._cache[key] = (time.monotonic(), matches[0])
+        return matches[0]
+
+
 # ---- the tools ------------------------------------------------------------
 
 
 def computer_tools(config: Config, runner: Runner | None = None, app_list: Callable[[], list[App]] = installed_apps) -> list[Tool]:
     runner = runner or Runner()
     home = Path.home().resolve()
+    finder = NameFinder(home)
 
     def _short(path: Path) -> str:
         try:
@@ -484,7 +580,10 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
             if url:
                 runner.start(["xdg-open", url])
                 return f"Opened {urlparse(url).netloc or url} in your browser."
-            raise ToolError(f"{_short(path)} does not exist. If you only know the file's name, find its full path with find_my_files first.")
+            if "/" in target or target.startswith("~"):
+                raise ToolError(f"{_short(path)} does not exist.")
+            # Just a name, like "Downloads" or "Alparslan folder": look for it.
+            path = finder.find(target, tool="open_file_or_website", arg="target")
         path = path.resolve()
         if not any(path == root or root in path.parents for root in config.read_folders):
             raise ToolError(f"Not allowed to open {path}.")
@@ -494,63 +593,8 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
 
     # ---- move to the Trash ----
 
-    found_cache: dict[str, tuple[float, Path]] = {}
-
     def _find_by_name(raw: str, base: Path | None = None) -> Path:
-        """Search the home folder (or base) for a file or folder called (roughly)
-        raw. Capitals, spaces and small spelling slips don't matter."""
-        base = base or home
-        key = f"{base}\0{raw}"
-        cached = found_cache.get(key)
-        if cached and time.monotonic() - cached[0] < 120:
-            return cached[1]
-        words = [w for w in re.split(r"\s+", raw) if w.lower() not in ("the", "my", "folder", "file", "directory")]
-        wanted = _squash(" ".join(words) or raw)
-        if not wanted:
-            raise ToolError("No file or folder name given.")
-        exact: list[Path] = []
-        close: list[tuple[float, Path]] = []
-        guess: tuple[float, Path] | None = None
-        deadline = time.monotonic() + SEARCH_SECONDS
-        for root, dirs, files in os.walk(base):
-            depth = len(Path(root).relative_to(base).parts)
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_SEARCH and depth < SEARCH_DEPTH]
-            for name in dirs + files:
-                if name.startswith("."):
-                    continue
-                squashed, stem = _squash(name), _squash(Path(name).stem)
-                path = Path(root) / name
-                if wanted in (squashed, stem):
-                    exact.append(path)
-                elif not exact:
-                    ratio = max(SequenceMatcher(None, wanted, squashed).ratio(), SequenceMatcher(None, wanted, stem).ratio())
-                    if ratio >= 0.85:
-                        close.append((ratio, path))
-                    elif ratio >= 0.6 and (guess is None or ratio > guess[0]):
-                        guess = (ratio, path)
-            if time.monotonic() > deadline:
-                break
-        matches = exact or [p for _, p in sorted(close, key=lambda c: -c[0])]
-        if not matches and guess:
-            g = guess[1]
-            kind = "folder" if g.is_dir() else "file"
-            raise Unsure(
-                f"Did you mean the {kind} {g.name} in {_place(g)}?",
-                {"path": str(g)},
-                f"Nothing called '{raw}'; the closest is {_short(g)}.",
-            )
-        if not matches:
-            where = "your home folder" if base == home else _short(base)
-            raise ToolError(f"Nothing called '{raw}' was found in {where}. Ask the user to check the name.")
-        if len(matches) > 1:
-            shown = "\n".join(f"  {_short(m)}{'/' if m.is_dir() else ''}" for m in matches[:6])
-            more = f"\n  ...and {len(matches) - 6} more" if len(matches) > 6 else ""
-            raise ToolError(
-                f"Several things are called '{raw}':\n{shown}{more}\n"
-                "Ask the user which one, then call move_to_trash again with its full path."
-            )
-        found_cache[key] = (time.monotonic(), matches[0])
-        return matches[0]
+        return finder.find(raw, base, tool="move_to_trash", arg="path")
 
     def _trash_target(path: str) -> Path:
         raw = (path or "").strip()
@@ -609,7 +653,7 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
     def move_to_trash(path: str) -> str:
         p = _trash_target(path)
         send_to_trash(p, trash_dir())
-        found_cache.clear()
+        finder.forget()
         return f"Moved {p.name} to the Trash. You can get it back from there."
 
     # ---- power ----
@@ -668,24 +712,24 @@ def computer_tools(config: Config, runner: Runner | None = None, app_list: Calla
         ),
         Tool(
             name="open_file_or_website",
-            description="Open a file or folder in its normal program, or a website in the browser.",
+            description="Open a folder (e.g. Downloads) or a file in its normal program, or a website in the browser.",
             run=open_file_or_website,
             risk=Risk.ACT,
             show_directly=True,
             parameters={
-                "target": {"type": "string", "description": "Full path like ~/Downloads/lab5.pdf, or a website like youtube.com"}
+                "target": {"type": "string", "description": "A path like ~/Downloads/lab5.pdf, just a name like Downloads or Alparslan, or a website like youtube.com"}
             },
             required=["target"],
         ),
         Tool(
             name="close_app",
-            description="Close an app and all its windows. Open folders are windows of the Files app.",
+            description="Close an app and all its windows.",
             run=close_app,
             risk=Risk.CHANGE,
             show_directly=True,
             check=check_close,
             explain=explain_close,
-            parameters={"name": {"type": "string", "description": "App name, e.g. VS Code, or Files for folders"}},
+            parameters={"name": {"type": "string", "description": "App name, e.g. VS Code. Use Files to close open folders."}},
             required=["name"],
         ),
         Tool(

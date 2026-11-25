@@ -246,6 +246,49 @@ class ComputerTests(unittest.TestCase):
         self.assertNotIn(".ssh", hints)
         self.assertLessEqual(len(speech_hints(self.apps * 50, self.home, limit=300)), 300)
 
+    # ---- folders by name ----
+
+    def test_open_folder_by_spoken_name_goes_straight_to_the_folder(self):
+        (self.home / "Documents").mkdir()
+        (self.home / "Telegram Desktop" / "Downloads").mkdir(parents=True)
+        for said, expected in [
+            ("Open download folder.", "Downloads"),
+            ("open my Downloads folder", "Downloads"),
+            ("Open the old folder please", "Downloads/old"),
+        ]:
+            self.runner.started.clear()
+            agent, brain = self.agent([], confirm=lambda t, a: self.fail("asked"))
+            answer = agent.ask(said)
+            self.assertEqual(self.runner.started, [["xdg-open", str(self.home / expected)]], said)
+            self.assertTrue(answer.startswith("Opened the folder"), answer)
+            self.assertEqual(brain.seen, [])  # the brain was not needed
+
+    def test_misheard_folder_to_open_asks_did_you_mean(self):
+        (self.home / "Documents").mkdir()
+        questions = []
+        agent, _ = self.agent([], confirm=lambda t, a: False, ask=lambda q: questions.append(q) or True)
+        answer = agent.ask("Open Lockament folder.")
+        self.assertEqual(questions, ["Did you mean the folder Documents in your home folder?"])
+        self.assertEqual(answer, "Opened the folder ~/Documents.")
+
+    def test_unknown_folder_falls_back_to_the_brain(self):
+        agent, brain = self.agent([BrainReply("I couldn't find that folder, sir.")], confirm=lambda t, a: False)
+        self.assertEqual(agent.ask("open the zebra folder"), "I couldn't find that folder, sir.")
+        self.assertIn("Nothing called", [m for m in brain.seen[0] if m.role == "tool"][-1].content)
+
+    def test_count_videos_in_a_folder_by_name(self):
+        target = self.home / "Projects" / "Alparslan"
+        (target / "part2").mkdir(parents=True)
+        for name in ("a.mp4", "b.MKV", "notes.txt"):
+            (target / name).write_text("x")
+        (target / "part2" / "c.mov").write_text("x")
+        tools = ToolRegistry(builtin_tools(self.config))
+        result = tools.get("list_folder").run(path="Al-Parslan", only="videos")
+        self.assertIn("Alparslan: 4 items", result)
+        self.assertIn("Videos (2): Also 1 more inside its subfolders.", result)
+        self.assertIn("a.mp4", result)
+        self.assertNotIn("notes.txt", result)
+
     # ---- files and websites ----
 
     def test_open_website_and_file(self):
