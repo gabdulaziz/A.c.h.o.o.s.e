@@ -73,33 +73,51 @@ def record_until_silence(
     silence_seconds: float = 1.0,
     max_seconds: float = 15.0,
     wait_for_speech_seconds: float = 5.0,
+    noise_level: float | None = None,
+    on_noise: Callable[[float], None] | None = None,
+    skip_seconds: float = 0.0,
 ) -> np.ndarray:
     """Record one spoken request: starts when you speak, stops after a pause.
 
-    Uses loudness only: the first few blocks measure the room's background
-    noise, and anything clearly louder counts as speech.
+    Uses loudness only: anything clearly louder than the room's background
+    noise counts as speech. The background is measured in the first few
+    blocks, unless noise_level (measured earlier) is given: then speech that
+    starts at once is caught too, as with a quick "yes" to "Shall I?".
+    The last moment before speech is kept, so the first sound is not cut.
+    skip_seconds: ignore the very start (the end of the beep can echo in).
     Returns an empty array if nobody spoke.
     """
     per_second = RATE / FRAME
+    skip = int(skip_seconds * per_second)
     blocks: list[np.ndarray] = []
+    before: list[np.ndarray] = []  # the last ~0.3 s before speech started
     noise: list[float] = []
     started = False
     quiet = 0
     waited = 0
     for block in frames:
-        level = float(np.sqrt(np.mean(block.astype(np.float32) ** 2)))
-        if len(noise) < 4:  # first ~0.3 s: learn the background level
-            noise.append(level)
+        if skip > 0:
+            skip -= 1
             continue
-        threshold = max(np.median(noise) * 3.0, 300.0)
+        level = float(np.sqrt(np.mean(block.astype(np.float32) ** 2)))
+        if noise_level is None and len(noise) < 4:  # first ~0.3 s: learn the background level
+            noise.append(level)
+            before.append(block)
+            if len(noise) == 4 and on_noise:
+                on_noise(float(np.median(noise)))
+            continue
+        floor = noise_level if noise_level is not None else float(np.median(noise))
+        threshold = max(floor * 3.0, 300.0)
         loud = level > threshold
         if not started:
             waited += 1
             if loud:
                 started = True
+                blocks.extend(before)
             elif waited > wait_for_speech_seconds * per_second:
                 return np.zeros(0, dtype=np.int16)
             else:
+                before = (before + [block])[-4:]
                 continue
         blocks.append(block)
         quiet = 0 if loud else quiet + 1
@@ -121,7 +139,9 @@ class Ears:
         self.model = WhisperModel(model, device="cpu", compute_type="int8")
         self.english_only = model.endswith(".en")
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, short_answer: bool = False) -> str:
+        """short_answer=True for a one-word reply like "yes": the speech filter
+        is skipped, because it can throw away a word that short."""
         if audio.size < RATE // 4:  # under a quarter second: nothing said
             return ""
         samples = audio.astype(np.float32) / 32768.0
@@ -129,7 +149,7 @@ class Ears:
             samples,
             language="en" if self.english_only else None,
             beam_size=1,  # fastest; good enough for short requests
-            vad_filter=True,  # ignore silence and background noise
+            vad_filter=not short_answer,  # ignore silence and background noise
         )
         return " ".join(s.text.strip() for s in segments).strip()
 

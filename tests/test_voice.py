@@ -27,7 +27,7 @@ class TextTests(unittest.TestCase):
         self.assertNotIn("~/", clean_for_speech("Saved to ~/Achoose/notes/todo.md"))
 
     def test_only_a_clear_yes_is_yes(self):
-        for text in ["Yes.", "yeah go ahead", "Sure, do it", "okay"]:
+        for text in ["Yes.", "yeah go ahead", "Sure, do it", "okay", "Yes, sir.", "Of course.", "Absolutely", "Please do."]:
             self.assertTrue(heard_yes(text), text)
         for text in ["", "no", "yes, no wait", "hmm", "not now", "maybe"]:
             self.assertFalse(heard_yes(text), text)
@@ -77,13 +77,33 @@ class RecordingTests(unittest.TestCase):
         audio = record_until_silence(self.blocks(pattern), silence_seconds=1.0)
         n_blocks = audio.size // FRAME
         self.assertGreaterEqual(n_blocks, 20)
-        self.assertLess(n_blocks, 20 + 16)  # ~1 s of silence (12.5 blocks) then stop
+        self.assertLess(n_blocks, 4 + 20 + 16)  # 0.3 s before + speech + ~1 s of silence, then stop
 
     def test_nobody_speaks(self):
         from achoose.voice.engine import record_until_silence
 
         audio = record_until_silence(self.blocks([0] * 200), wait_for_speech_seconds=2)
         self.assertEqual(audio.size, 0)
+
+    def test_quick_answer_is_caught_with_known_noise(self):
+        from achoose.voice.engine import FRAME, record_until_silence
+
+        # "yes" starts at once, during what used to be the noise check
+        pattern = [1] * 5 + [0] * 40
+        old_way = record_until_silence(self.blocks(pattern), wait_for_speech_seconds=2)
+        self.assertLess(old_way.size // FRAME, 5)  # the yes was lost
+        heard = []
+        audio = record_until_silence(self.blocks(pattern), noise_level=10.0, on_noise=heard.append)
+        self.assertGreaterEqual(audio.size // FRAME, 5)  # the whole yes is kept
+        self.assertEqual(heard, [])
+
+    def test_noise_is_remembered_and_start_of_speech_kept(self):
+        from achoose.voice.engine import FRAME, record_until_silence
+
+        heard = []
+        audio = record_until_silence(self.blocks([0] * 10 + [1] * 10 + [0] * 20), on_noise=heard.append)
+        self.assertEqual(len(heard), 1)
+        self.assertGreaterEqual(audio.size // FRAME, 10 + 4)  # 4 quiet blocks before speech kept
 
 
 @unittest.skipUnless(HAS_NUMPY, "numpy not installed")
@@ -124,7 +144,7 @@ class VoiceLoopTests(unittest.TestCase):
                 return gen()
 
         class Ears:
-            def transcribe(self_, audio):
+            def transcribe(self_, audio, short_answer=False):
                 return heard.pop(0)
 
         class Mouth:
@@ -156,7 +176,7 @@ class VoiceLoopTests(unittest.TestCase):
         import achoose.voice.loop as loop
 
         original = loop.record_until_silence
-        loop.record_until_silence = lambda frames: np.ones(8000, dtype=np.int16)
+        loop.record_until_silence = lambda frames, **kw: np.ones(8000, dtype=np.int16)
         try:
             run_voice(self.agent, Mic(), Ears(), mouth, Wake(), lambda p: None, lambda: False, "sir")
         finally:
@@ -166,7 +186,7 @@ class VoiceLoopTests(unittest.TestCase):
     def test_conversation_confirmation_and_goodbye(self):
         mouth = self.run_loop(["How are you?", "Note that I need milk", "yes", "Goodbye"])
         self.assertIn("Good evening, sir", mouth.streamed)
-        self.assertTrue(any("Shall I do this, sir?" in s for s in mouth.said))
+        self.assertTrue(any("Shall I, sir? Say yes or no" in s for s in mouth.said))
         self.assertTrue(list((Path(self.tmp.name) / "notes").glob("*milk*.md")))  # saved after spoken yes
         self.assertEqual(mouth.said[-1], "Goodbye, sir.")
         self.assertIn("SPOKEN aloud", self.brain.seen[0][0].content)

@@ -48,8 +48,11 @@ class SentenceSplitter:
         return [rest] if rest else []
 
 
-_YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "affirmative", "proceed", "confirm", "confirmed"}
-_YES_PHRASES = ("go ahead", "do it", "please do")
+_YES = {
+    "yes", "yeah", "yea", "yah", "ya", "yep", "yup", "yess", "yesh", "sure", "ok", "okay", "alright",
+    "affirmative", "proceed", "confirm", "confirmed", "certainly", "absolutely", "correct", "indeed", "please",
+}
+_YES_PHRASES = ("go ahead", "do it", "please do", "of course", "all right", "close it", "delete it", "you may")
 _NO = {"no", "nope", "don't", "dont", "stop", "cancel", "not", "never", "wait"}
 
 

@@ -30,22 +30,47 @@ def run_voice(
     """
     sir = f", {call_user}" if call_user else ""
 
+    room = {"noise": None}  # background noise, measured while you are quiet
+
+    def remember_noise(level: float) -> None:
+        room["noise"] = level
+
     def listen() -> str:
         frames = mic.frames()
         try:
-            audio = record_until_silence(frames)
+            audio = record_until_silence(frames, on_noise=remember_noise)
         finally:
             frames.close()  # microphone off while Achoose thinks and talks
         return ears.transcribe(audio)
 
+    def listen_for_answer() -> str:
+        """A short yes/no. People answer the moment the question ends, so the
+        room is not measured again (that would treat the "yes" as background
+        noise): the earlier measurement is used, and the wait is longer."""
+        frames = mic.frames()
+        try:
+            audio = record_until_silence(
+                frames, silence_seconds=0.8, max_seconds=5.0, wait_for_speech_seconds=8.0,
+                noise_level=room["noise"], on_noise=remember_noise, skip_seconds=0.16,
+            )
+        finally:
+            frames.close()
+        return ears.transcribe(audio, short_answer=True)
+
     def confirm_by_voice(tool: Tool, arguments: dict[str, Any]) -> bool:
         end_line()
-        question = tool.describe(arguments).splitlines()[0]
+        question = tool.describe(arguments).splitlines()[0].rstrip(".")
         print(f"\n  ⚠  Achoose wants to do this: {tool.describe(arguments)}")
-        mouth.say(f"Shall I do this{sir}? {question}. Please say yes or no.")
-        mouth.wait()
-        mouth.beep()
-        answer = listen()
+        mouth.say(f"{question}. Shall I{sir}? Say yes or no after the beep.")
+        for attempt in (1, 2):
+            mouth.wait()
+            mouth.beep()
+            print("  (listening for yes or no...)", flush=True)
+            answer = listen_for_answer()
+            if answer or attempt == 2:
+                break
+            print("  (heard nothing, asking again)")
+            mouth.say(f"Sorry{sir}, I didn't hear you. Yes or no?")
         allowed = heard_yes(answer)
         print(f"  You said: {answer or '(nothing)'}  →  {'✓ allowed' if allowed else '✗ declined'}")
         return allowed
