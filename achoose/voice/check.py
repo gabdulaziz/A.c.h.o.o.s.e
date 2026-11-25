@@ -170,16 +170,25 @@ def run_hear_test(config, language: str = "auto", model: str = "base", rounds: i
         print(f"FAILED: {err}")
         return 1
     print(f"Loaded in {time.perf_counter() - started:.1f} s.")
+    # Measure the room once, while you are quiet. (Measuring at the start of each
+    # sentence missed people who speak right after pressing Enter.)
+    print("\nMeasuring your room's background noise: please stay quiet for 1 second...", flush=True)
+    noise = max(_level(_record(mic, 1.0)), 1.0)
+    print(f"Background noise level: {noise:.0f}")
     results = []
     for n in range(1, rounds + 1):
         try:
-            input(f"\n[{n}/{rounds}] Press Enter, then say one sentence (for example a command for Achoose)... ")
+            input(
+                f"\n[{n}/{rounds}] Press Enter, then say a COMMAND, e.g. "
+                "'How many videos are in the Alparslan folder?' (not the wake word)... "
+            )
         except (EOFError, KeyboardInterrupt):
             print()
             break
+        print("  Speak now...", flush=True)
         frames = mic.frames()
         try:
-            audio = record_until_silence(frames, wait_for_speech_seconds=6.0)
+            audio = record_until_silence(frames, wait_for_speech_seconds=8.0, noise_level=noise, skip_seconds=0.1)
         finally:
             frames.close()
         if audio.size == 0:
