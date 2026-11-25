@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 from achoose.agent import build_system_prompt  # noqa: E402
 from achoose.brain import BrainError, Message, OllamaBrain  # noqa: E402
 from achoose.config import load_config  # noqa: E402
-from achoose.tools import ToolRegistry, builtin_tools  # noqa: E402
+from achoose.tools import ToolRegistry, builtin_tools, computer_tools  # noqa: E402
 from achoose.tools.memory_tool import memory_tools  # noqa: E402
 
 DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "llama3.2:3b"]
@@ -92,6 +92,20 @@ CASES = [
         "list_folder",
         lambda a: "download" in _text(a, "path") and "folder" in _text(a, "only"),
     ),
+    Case("Open VS Code.", "open_app", lambda a: "code" in _text(a, "name")),
+    Case(
+        "Open a new terminal window.",
+        "open_app",
+        lambda a: "terminal" in _text(a, "name") and str(a.get("new_window")).lower() == "true",
+    ),
+    Case("Open youtube.com", "open_file_or_website", lambda a: "youtube" in _text(a, "target")),
+    Case(
+        "Delete the file ~/Downloads/old-notes.txt",
+        "move_to_trash",
+        lambda a: _text(a, "path").endswith("old-notes.txt"),
+    ),
+    Case("Shut down the computer.", "shut_down_or_restart", lambda a: _text(a, "action") == "shutdown"),
+    Case("Lock my screen.", "lock_or_sleep", lambda a: _text(a, "action") == "lock"),
     Case("Hi! How are you today?", None),
     Case("What is the capital of France?", None),
     Case("Write a short, kind birthday wish for my sister.", None),
@@ -147,7 +161,7 @@ def _full_name(name: str) -> str:
 def bench_model(model: str, host: str, schemas: list[dict[str, Any]]) -> Result:
     res = Result(model=model, tool_total=len(CASES))
     brain = OllamaBrain(model, host=host, context_tokens=4096, temperature=0.0, think=False)
-    system = Message("system", build_system_prompt("~/Documents, ~/Downloads"))
+    system = Message("system", build_system_prompt("~/Documents, ~/Downloads", computer=True))
 
     try:
         # 1. Wake the model up (measures load time). This also lets Ollama
@@ -296,7 +310,7 @@ def main() -> int:
         return 1
 
     # Tools are only described to the model here, never run.
-    schemas = ToolRegistry(builtin_tools(config) + memory_tools(None)).schemas()
+    schemas = ToolRegistry(builtin_tools(config) + memory_tools(None) + computer_tools(config)).schemas()
     results = []
     for m in models:
         print(f"\n=== {m} ===")
