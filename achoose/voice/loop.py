@@ -38,7 +38,12 @@ def run_voice(
     def listen() -> str:
         frames = mic.frames()
         try:
-            audio = record_until_silence(frames, on_noise=remember_noise)
+            # After the first time, the room's noise is already known, so a
+            # request that starts right at the beep is not mistaken for noise.
+            audio = record_until_silence(
+                frames, noise_level=room["noise"], on_noise=remember_noise,
+                skip_seconds=0.16 if room["noise"] is not None else 0.0,
+            )
         finally:
             frames.close()  # microphone off while Achoose thinks and talks
         return ears.transcribe(audio)
