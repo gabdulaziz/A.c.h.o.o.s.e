@@ -26,6 +26,16 @@ class TextTests(unittest.TestCase):
         self.assertEqual(clean_for_speech("**Done**, sir! 😊"), "Done , sir!")
         self.assertNotIn("~/", clean_for_speech("Saved to ~/Achoose/notes/todo.md"))
 
+    def test_repeated_phrases_are_kept_once(self):
+        from achoose.voice.text import drop_repeats
+
+        looped = "Hey, I choose. " * 40 + "Hey, I"
+        self.assertEqual(drop_repeats(looped.strip()), "Hey, I choose. Hey, I")
+        self.assertEqual(drop_repeats("open open open the folder"), "open the folder")
+        normal = "Open the Downloads folder, then open the Documents folder."
+        self.assertEqual(drop_repeats(normal), normal)
+        self.assertEqual(drop_repeats("no no"), "no no")
+
     def test_only_a_clear_yes_is_yes(self):
         for text in ["Yes.", "yeah go ahead", "Sure, do it", "okay", "Yes, sir.", "Of course.", "Absolutely", "Please do."]:
             self.assertTrue(heard_yes(text), text)

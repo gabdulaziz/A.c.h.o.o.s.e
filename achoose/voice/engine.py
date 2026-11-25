@@ -19,10 +19,11 @@ from typing import Callable
 
 import numpy as np
 
-from .text import SentenceSplitter, clean_for_speech
+from .text import SentenceSplitter, clean_for_speech, drop_repeats
 
 RATE = 16_000  # microphone sample rate that whisper and the wake word expect
 FRAME = 1_280  # 80 ms of audio, the block size openWakeWord works with
+MAX_WORDS_TOKENS = 80  # longest transcription, in tokens (~60 words)
 
 
 class VoiceSetupError(RuntimeError):
@@ -151,15 +152,24 @@ class Ears:
         if audio.size < RATE // 4:  # under a quarter second: nothing said
             return ""
         samples = audio.astype(np.float32) / 32768.0
-        segments, info = self.model.transcribe(
-            samples,
+        options = dict(
             language=self.language,
             beam_size=1,  # fastest; good enough for short requests
             vad_filter=not short_answer,  # ignore silence and background noise
             # not for yes/no: a list of names there could turn a "yes" into a name
             initial_prompt=(self.hints or None) if not short_answer else None,
+            # Guards against the model getting stuck repeating itself
+            # ("Hey, I choose. Hey, I choose. ..."): don't feed its own words
+            # back in, and stop after about 60 words (a spoken command is shorter).
+            condition_on_previous_text=False,
+            max_new_tokens=MAX_WORDS_TOKENS,
         )
-        text = " ".join(s.text.strip() for s in segments).strip()
+        try:
+            segments, info = self.model.transcribe(samples, **options)
+        except TypeError:  # an older faster-whisper without max_new_tokens
+            options.pop("max_new_tokens")
+            segments, info = self.model.transcribe(samples, **options)
+        text = drop_repeats(" ".join(s.text.strip() for s in segments).strip())
         self.last_language = getattr(info, "language", "") or ""
         return text
 

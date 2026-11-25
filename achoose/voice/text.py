@@ -63,3 +63,32 @@ def heard_yes(text: str) -> bool:
         return False
     joined = " ".join(words)
     return words[0] in _YES or any(p in joined for p in _YES_PHRASES)
+
+
+def drop_repeats(text: str, keep: int = 1) -> str:
+    """Remove a phrase the speech model repeated over and over:
+    "Hey, I choose. Hey, I choose. Hey, I choose." -> "Hey, I choose."
+    A phrase (1 to 8 words) said 3 or more times in a row is kept once."""
+    words = text.split()
+    if len(words) < 3:
+        return text
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        cut = False
+        for size in range(1, 9):
+            chunk = [w.lower().strip(".,!?") for w in words[i : i + size]]
+            if len(chunk) < size:
+                break
+            n = 1
+            while [w.lower().strip(".,!?") for w in words[i + n * size : i + (n + 1) * size]] == chunk:
+                n += 1
+            if n >= 3:
+                out.extend(words[i : i + size * keep])
+                i += n * size
+                cut = True
+                break
+        if not cut:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
