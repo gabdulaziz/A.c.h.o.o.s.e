@@ -9,8 +9,11 @@ and a benchmark to choose the best small model for your laptop.
 
 * **Reading is automatic.** Achoose may look at the time, list folders and read text files
   inside the folders you allow (your home folder by default).
-* **Changing things always asks you first.** Saving, sending, deleting, installing or running
-  anything waits for you to type `y`. If you press Enter or anything else, nothing happens.
+* **Harmless actions are automatic.** Opening an app, a file, a folder or a website, locking the
+  screen and sleep happen when you ask.
+* **Changing things always asks you first.** Saving, sending, deleting, shutting down, restarting,
+  installing or running anything waits for you to type `y` (or say "yes" in voice mode). If you press
+  Enter or anything else, nothing happens.
 
 ## How it is built
 
@@ -22,6 +25,7 @@ achoose/
   tools/        things Achoose can do
     base.py       what a tool is, and its risk level (READ or CHANGE)
     builtin.py    time, list folder, read file, save note
+    computer.py   open apps/files/websites, move to Trash, lock, sleep, shut down, restart
     memory_tool.py  search_my_files (search inside indexed folders)
   memory/       private search index over folders you choose
     extract.py    text out of txt/code/html/pdf/docx/pptx, cut into pieces
@@ -133,6 +137,23 @@ mkdir -p ~/Achoose/wake_words && mv ~/Downloads/hey_achoose.onnx ~/Achoose/wake_
 
 Every `.onnx` file in `~/Achoose/wake_words/` is used automatically, and "Hey Jarvis" keeps working as a backup.
 Run `--voice-check` to see the scores for each wake word.
+
+## Controlling the computer
+
+Things you can ask (typed or spoken):
+
+| Ask | What happens | Asks first? |
+|---|---|---|
+| "Open VS Code", "open Firefox" | Starts the app from your app menu's list | no |
+| "Open a new terminal window" | Uses the app's own "New Window" | no |
+| "Open my Downloads folder", "open youtube.com" | Opens it like a double-click / in your browser | no |
+| "Delete ~/Downloads/old.zip" | Moves it to the **Trash** (restore it from the Files app) | **yes** |
+| "Shut down" / "Restart" | Turns off / restarts after 5 seconds. Save your work first | **yes** |
+| "Lock my screen" / "Go to sleep" | Locks the screen / suspends | no |
+
+Achoose never runs a command the brain made up: apps are started only from the installed app list,
+files only go to the Trash (never deleted for good), and only inside your home folder. Your main folders
+(Documents, Downloads, ...), hidden settings folders and Achoose's own folders are refused.
 
 ## Chat commands
 

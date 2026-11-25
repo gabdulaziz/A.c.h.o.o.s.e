@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import CONFIG_PATH, load_config
 from .memory import open_memory
-from .tools import Risk, Tool, ToolRegistry, builtin_tools
+from .tools import Tool, ToolRegistry, builtin_tools, computer_tools
 from .tools.memory_tool import memory_tools
 
 HELP = """Commands:
@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Models you have: {', '.join(installed)}")
             return 1
 
-    tools = ToolRegistry(builtin_tools(config))
+    tools = ToolRegistry(builtin_tools(config) + computer_tools(config))
     memory, why_not = open_memory(config)
     if memory:
         for tool in memory_tools(memory):
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("Conversation forgotten.")
             elif cmd == "/tools":
                 for t in tools:
-                    tag = "asks first" if t.risk is not Risk.READ else "automatic"
+                    tag = "asks first" if t.risk.asks_first else "automatic"
                     print(f"  {t.name:18} ({tag})  {t.description}")
             elif cmd == "/stats":
                 print_stats(agent)

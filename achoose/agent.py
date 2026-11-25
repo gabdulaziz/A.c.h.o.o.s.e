@@ -1,7 +1,8 @@
 """The thinking loop: question -> brain -> tools -> brain -> answer.
 
 The confirmation gate lives here. Every tool marked Risk.CHANGE goes through
-`confirm` before it runs, and nothing else can skip that check.
+`confirm` before it runs, and nothing else can skip that check. READ and ACT
+(harmless, like opening an app) tools run on their own.
 """
 
 from __future__ import annotations
@@ -42,6 +43,12 @@ NO_ACCESS = re.compile(
 )
 
 
+COMPUTER_PROMPT = """
+You can also control this computer: open apps, files, folders and websites, move files to the Trash, lock, sleep, shut down or restart.
+When the user asks for one of these, call the tool at once. The user is asked to confirm risky steps automatically, so never ask "are you sure" yourself.
+To open or delete a file you only know by name, find its full path with find_my_files first."""
+
+
 VOICE_PROMPT = """
 Your answers are SPOKEN aloud: use at most 3 short sentences, no lists, no markdown, no file paths."""
 
@@ -68,8 +75,12 @@ TIME_QUESTION = re.compile(
 )
 
 
-def build_system_prompt(memory_folders: str = "", call_user: str = "", voice: bool = False) -> str:
+def build_system_prompt(
+    memory_folders: str = "", call_user: str = "", voice: bool = False, computer: bool = False
+) -> str:
     extra = MEMORY_PROMPT.format(folders=memory_folders) if memory_folders else ""
+    if computer:
+        extra += COMPUTER_PROMPT
     if call_user:
         extra += f"\nYou have the calm, polite, formal manner of a British butler. Address the user as '{call_user}' now and then. Never invent facts, times, places or offers: say only what you know or what a tool returned."
     if voice:
@@ -199,12 +210,15 @@ class Agent:
         tool = self.tools.get(call.name)
         if tool is None:
             result = f"Error: there is no tool called '{call.name}'."
-        elif tool.risk is not Risk.READ and not self.confirm(tool, call.arguments):
-            result = "The user declined this action. It was NOT done."
         else:
             try:
-                result = tool.run(**call.arguments)
-                ok = True
+                if tool.check:
+                    tool.check(**call.arguments)
+                if tool.risk.asks_first and not self.confirm(tool, call.arguments):
+                    result = "The user declined this action. It was NOT done."
+                else:
+                    result = tool.run(**call.arguments)
+                    ok = True
             except ToolError as err:
                 result = f"Error: {err}"
             except TypeError as err:  # wrong or missing arguments from the model
@@ -216,7 +230,8 @@ class Agent:
         return result, ok
 
     def _messages(self) -> list[Message]:
-        system = build_system_prompt(self.memory_folders, self.call_user, self.voice)
+        computer = self.tools.get("open_app") is not None
+        system = build_system_prompt(self.memory_folders, self.call_user, self.voice, computer)
         return [Message("system", system), *self.history]
 
     def _trim_history(self) -> None:

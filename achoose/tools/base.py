@@ -11,12 +11,20 @@ class Risk(str, Enum):
     """How careful Achoose must be before running a tool.
 
     READ:   only looks at things. Runs on its own.
-    CHANGE: sends, saves, deletes, installs or runs something.
+    ACT:    does something harmless and easy to undo (open an app or a
+            website, lock the screen). Runs on its own.
+    CHANGE: sends, saves, deletes, shuts down, installs or runs something.
             Always asks you first.
     """
 
     READ = "read"
+    ACT = "act"
     CHANGE = "change"
+
+    @property
+    def asks_first(self) -> bool:
+        """Anything that is not plainly harmless asks first (safe default for new kinds)."""
+        return self not in (Risk.READ, Risk.ACT)
 
 
 class ToolError(Exception):
@@ -37,6 +45,9 @@ class Tool:
     # True: the result is shown to the user as it is, and the brain is not
     # asked to re-write it (writing is slow on a laptop). Used for lists.
     show_directly: bool = False
+    # Optional: checks the arguments BEFORE the user is asked (raises ToolError),
+    # so Achoose never asks "Shall I?" about something it would refuse anyway.
+    check: Callable[..., None] | None = None
 
     def schema(self) -> dict[str, Any]:
         return {
